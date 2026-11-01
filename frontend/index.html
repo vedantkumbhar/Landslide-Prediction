@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Landslide Intelligence | Environmental Monitor</title>
+
+  <link rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: #0b1220;
+      color: #e5edf8;
+    }
+
+    header {
+      padding: 20px 24px;
+      background: #111c2e;
+      border-bottom: 1px solid #27364b;
+    }
+
+    h1 { margin: 0 0 7px; font-size: 24px; }
+    header p { margin: 0; color: #9eafc5; font-size: 14px; }
+
+    main { padding: 20px; max-width: 1500px; margin: auto; }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    select, button {
+      padding: 10px 13px;
+      border-radius: 8px;
+      border: 1px solid #34445b;
+      background: #172438;
+      color: #edf4ff;
+      font-size: 14px;
+    }
+
+    button { cursor: pointer; background: #176bca; border-color: #176bca; }
+    button:disabled { opacity: .6; cursor: wait; }
+    .status { color: #a9bad0; font-size: 13px; }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .card, .panel {
+      padding: 16px;
+      background: #111c2e;
+      border: 1px solid #27364b;
+      border-radius: 12px;
+    }
+
+    .card small { color: #9eafc5; }
+    .number { font-size: 25px; font-weight: 700; margin-top: 8px; }
+
+    .map-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 16px;
+    }
+
+    #map {
+      height: 570px;
+      min-width: 0;
+      border-radius: 12px;
+      border: 1px solid #34445b;
+      overflow: hidden;
+    }
+
+    .panel { align-self: start; }
+    .panel h2 { font-size: 17px; margin: 0 0 14px; }
+
+    .legend-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin: 12px 0;
+      font-size: 13px;
+      color: #c4d0e0;
+    }
+
+    .dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+
+    .note {
+      color: #9eafc5;
+      font-size: 12px;
+      line-height: 1.6;
+      margin-top: 16px;
+    }
+
+    .point-list { margin-top: 18px; max-height: 300px; overflow-y: auto; }
+
+    .point-item {
+      padding: 10px 0;
+      border-bottom: 1px solid #27364b;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    .monitoring-level { font-weight: 700; }
+    .lower { color: #66d99a; }
+    .increased { color: #f3ca55; }
+    .elevated { color: #ff8b75; }
+    .unavailable { color: #a9bad0; }
+
+    @media (max-width: 950px) {
+      .map-layout { grid-template-columns: 1fr; }
+      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      #map { height: 460px; }
+    }
+
+    @media (max-width: 520px) {
+      .summary { grid-template-columns: 1fr; }
+      main { padding: 12px; }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>LANDSLIDE INTELLIGENCE</h1>
+    <p>Environmental Monitoring · Rainfall and Experimental Monitoring Indicator · India</p>
+  </header>
+
+  <main>
+    <div class="toolbar">
+      <select id="regionFilter" aria-label="Filter region">
+        <option value="all">All regions</option>
+        <option value="Himalayas">Himalayas</option>
+        <option value="Northeast_India">Northeast India</option>
+        <option value="Western_Maharashtra">Western Maharashtra</option>
+      </select>
+      <button id="refreshBtn">Refresh rainfall data</button>
+      <span class="status" id="status">Connecting to backend…</span>
+    </div>
+
+    <section class="summary">
+      <div class="card">
+        <small>Sampling points displayed</small>
+        <div class="number" id="pointCount">—</div>
+      </div>
+      <div class="card">
+        <small>Maximum latest hourly rainfall</small>
+        <div class="number" id="maxRain">—</div>
+      </div>
+      <div class="card">
+        <small>Maximum 3-hour accumulation</small>
+        <div class="number" id="total3h">—</div>
+      </div>
+      <div class="card">
+        <small>Maximum 24-hour accumulation</small>
+        <div class="number" id="total24h">—</div>
+      </div>
+    </section>
+
+    <div class="map-layout">
+      <div id="map"></div>
+
+      <aside class="panel">
+        <h2>Hourly rainfall intensity</h2>
+        <div class="legend-row"><span class="dot" style="background:#32b76a"></span>0 mm/hour</div>
+        <div class="legend-row"><span class="dot" style="background:#e8c547"></span>Above 0 to 2 mm/hour</div>
+        <div class="legend-row"><span class="dot" style="background:#f28c38"></span>Above 2 to 5 mm/hour</div>
+        <div class="legend-row"><span class="dot" style="background:#e34d59"></span>Above 5 mm/hour</div>
+
+        <h2 style="margin-top:22px">Rainfall monitoring indicator</h2>
+        <div class="legend-row"><span class="dot" style="background:#66d99a"></span>Lower rainfall accumulation</div>
+        <div class="legend-row"><span class="dot" style="background:#f3ca55"></span>Increased rainfall</div>
+        <div class="legend-row"><span class="dot" style="background:#ff8b75"></span>Elevated rainfall</div>
+
+        <p class="note">
+          The monitoring indicator uses provisional 3-hour and 24-hour
+          rainfall bands. It is not a validated landslide probability,
+          a safety assessment, or an official warning. Zero rainfall
+          does not mean a slope is safe.
+        </p>
+
+        <h2 style="margin-top:20px">Sampling points</h2>
+        <div id="pointList" class="point-list">Waiting for data…</div>
+      </aside>
+    </div>
+
+    <p id="retrieved" class="note">Data retrieval time: —</p>
+    <p class="note">
+      Source: Open-Meteo. Accumulations use available hourly records and
+      may include forecasts. Point estimates do not represent complete
+      regional coverage. Basemap © OpenStreetMap contributors.
+    </p>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const API_URL = "http://127.0.0.1:8000/rainfall/latest";
+
+    const map = L.map("map").setView([26.5, 83], 5);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 18,
+      attribution: "&copy; OpenStreetMap contributors"
+    }).addTo(map);
+
+    const markerLayer = L.layerGroup().addTo(map);
+    let allPoints = [];
+
+    function colorForRain(value) {
+      if (value <= 0) return "#32b76a";
+      if (value <= 2) return "#e8c547";
+      if (value <= 5) return "#f28c38";
+      return "#e34d59";
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, c => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      })[c]);
+    }
+
+    function maximum(points, field) {
+      const values = points
+        .map(p => Number(p[field]))
+        .filter(Number.isFinite);
+      return values.length ? Math.max(...values) : null;
+    }
+
+    function formatMm(value) {
+      return value === null ? "—" : value.toFixed(1) + " mm";
+    }
+
+    function monitoringClass(level) {
+      if (level === "Elevated rainfall") return "elevated";
+      if (level === "Increased rainfall") return "increased";
+      if (level === "Lower rainfall accumulation") return "lower";
+      return "unavailable";
+    }
+
+    function renderPoints() {
+      const selected = document.getElementById("regionFilter").value;
+      const points = allPoints.filter(p =>
+        selected === "all" || p.region === selected
+      );
+
+      markerLayer.clearLayers();
+
+      const list = document.getElementById("pointList");
+      list.replaceChildren();
+      const validPoints = [];
+
+      points.forEach(point => {
+        const lat = Number(point.api_latitude);
+        const lon = Number(point.api_longitude);
+        const rain = Number(point.precipitation_mm);
+
+        if (![lat, lon, rain].every(Number.isFinite)) return;
+        validPoints.push(point);
+
+        const rain3 = Number(point.rainfall_3h_mm);
+        const rain24 = Number(point.rainfall_24h_mm);
+        const color = colorForRain(rain);
+
+        const indicator = point.rainfall_monitoring || {};
+        const level = indicator.level || "Unavailable";
+        const levelClass = monitoringClass(level);
+
+        L.circleMarker([lat, lon], {
+          radius: 9,
+          color: "#ffffff",
+          weight: 1.5,
+          fillColor: color,
+          fillOpacity: 0.9
+        }).bindPopup(`
+          <strong>${escapeHtml(point.region)}</strong><br>
+          Hourly rainfall: ${rain.toFixed(1)} mm<br>
+          3-hour accumulation: ${Number.isFinite(rain3) ? rain3.toFixed(1) + " mm" : "Unavailable"}<br>
+          24-hour accumulation: ${Number.isFinite(rain24) ? rain24.toFixed(1) + " mm" : "Unavailable"}<br>
+          Monitoring indicator: <strong>${escapeHtml(level)}</strong><br>
+          <small>${escapeHtml(indicator.reason || "No indicator details available.")}</small><br>
+          Timestamp: ${escapeHtml(point.timestamp_local)}<br>
+          Latest record: ${escapeHtml(point.record_type)}<br>
+          Coordinates: ${lat.toFixed(4)}, ${lon.toFixed(4)}
+        `).addTo(markerLayer);
+
+        const item = document.createElement("div");
+        item.className = "point-item";
+        item.innerHTML = `
+          <strong>${escapeHtml(point.region)}</strong><br>
+          Hourly rainfall: ${rain.toFixed(1)} mm<br>
+          3-hour total: ${Number.isFinite(rain3) ? rain3.toFixed(1) + " mm" : "—"}<br>
+          24-hour total: ${Number.isFinite(rain24) ? rain24.toFixed(1) + " mm" : "—"}<br>
+          Monitoring: <span class="monitoring-level ${levelClass}">${escapeHtml(level)}</span><br>
+          <span>${escapeHtml(point.record_type)} · ${escapeHtml(point.timestamp_local)}</span>
+        `;
+        list.appendChild(item);
+      });
+
+      document.getElementById("pointCount").textContent = validPoints.length;
+      document.getElementById("maxRain").textContent =
+        formatMm(maximum(validPoints, "precipitation_mm"));
+      document.getElementById("total3h").textContent =
+        formatMm(maximum(validPoints, "rainfall_3h_mm"));
+      document.getElementById("total24h").textContent =
+        formatMm(maximum(validPoints, "rainfall_24h_mm"));
+
+      if (validPoints.length) {
+        const bounds = validPoints.map(p => [
+          Number(p.api_latitude),
+          Number(p.api_longitude)
+        ]);
+        map.fitBounds(bounds, { padding: [25, 25], maxZoom: 7 });
+      }
+    }
+
+    async function loadRainfall() {
+      const status = document.getElementById("status");
+      const button = document.getElementById("refreshBtn");
+      button.disabled = true;
+      status.textContent = "Loading rainfall data…";
+
+      try {
+        const response = await fetch(API_URL, { cache: "no-store" });
+        if (!response.ok) throw new Error("HTTP " + response.status);
+
+        const data = await response.json();
+        allPoints = data.regions || [];
+
+        document.getElementById("retrieved").textContent =
+          "Data retrieval time: " + (data.data_retrieved_at || "unknown");
+
+        renderPoints();
+        status.textContent =
+          `Loaded ${allPoints.length} points · ${data.source || "rainfall API"}`;
+      } catch (error) {
+        status.textContent = "Unable to load rainfall. Check that FastAPI is running.";
+        console.error("Rainfall API error:", error);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function refreshRainfall() {
+      const status = document.getElementById("status");
+      const button = document.getElementById("refreshBtn");
+      button.disabled = true;
+      status.textContent = "Fetching updated rainfall…";
+
+      try {
+        const response = await fetch(
+          "http://127.0.0.1:8000/rainfall/refresh",
+          { method: "POST" }
+        );
+
+        if (!response.ok) {
+          const body = await response.text();
+          throw new Error(body || "HTTP " + response.status);
+        }
+
+        await loadRainfall();
+      } catch (error) {
+        status.textContent = "Refresh failed. Check the FastAPI terminal.";
+        console.error("Rainfall refresh error:", error);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    document.getElementById("regionFilter")
+      .addEventListener("change", renderPoints);
+    document.getElementById("refreshBtn")
+      .addEventListener("click", refreshRainfall);
+
+    loadRainfall();
+  </script>
+</body>
+</html>
+```

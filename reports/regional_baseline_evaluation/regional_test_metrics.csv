@@ -1,0 +1,4 @@
+region,test_samples,positive_events,background_unverified,accuracy,balanced_accuracy,precision,recall,f1,roc_auc,true_negatives,false_positives,false_negatives,true_positives,evaluation_status
+Himalayas,184,146,38,0.7336956521739131,0.6472602739726028,0.8592592592592593,0.7945205479452054,0.8256227758007118,0.7007930785868782,19.0,19.0,30.0,116.0,Both labels present; provisional random-test metrics
+Northeast India,133,99,34,0.8872180451127819,0.827688651218063,0.9038461538461539,0.9494949494949495,0.9261083743842364,0.9346405228758169,24.0,10.0,5.0,94.0,Both labels present; provisional random-test metrics
+Western Maharashtra,18,18,0,,,,,,,,,,,Insufficient class diversity for binary evaluation

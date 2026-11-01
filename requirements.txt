@@ -1,0 +1,20 @@
+fastapi
+uvicorn[standard]
+pandas
+numpy
+scikit-learn
+pydantic-settings
+python-dotenv
+
+# GIS and geospatial processing
+rasterio
+geopandas
+pyproj
+shapely
+
+# Scientific computing
+scipy
+
+# Model utilities and HTTP
+joblib
+requests

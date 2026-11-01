@@ -1,0 +1,5 @@
+,elevation_m,elevation_m,elevation_m,elevation_m,elevation_m,elevation_m,slope_degrees,slope_degrees,slope_degrees,slope_degrees,slope_degrees,slope_degrees,previous_day_rainfall_mm,previous_day_rainfall_mm,previous_day_rainfall_mm,previous_day_rainfall_mm,previous_day_rainfall_mm,previous_day_rainfall_mm,event_day_rainfall_mm,event_day_rainfall_mm,event_day_rainfall_mm,event_day_rainfall_mm,event_day_rainfall_mm,event_day_rainfall_mm
+,count,mean,median,std,min,max,count,mean,median,std,min,max,count,mean,median,std,min,max,count,mean,median,std,min,max
+pilot_tile,,,,,,,,,,,,,,,,,,,,,,,,
+N27E088,78,1514.4,1481.57,963.61,229.44,3885.45,78,22.25,20.9,10.17,2.72,50.9,78,24.07,17.0,24.04,0.0,140.2,78,36.33,19.5,42.78,0.0,172.7
+N30E078,87,1437.57,1322.85,850.21,346.32,5180.25,87,26.26,26.04,13.02,1.38,52.47,87,27.16,15.4,30.02,0.1,143.9,87,25.34,12.9,32.77,0.5,150.3

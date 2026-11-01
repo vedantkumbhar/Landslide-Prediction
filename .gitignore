@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+*.py[cod]
+.env
+data/raw/*
+data/processed/*
+data/external/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/external/.gitkeep
+ml/models/
+*.pkl
+*.joblib
+*.keras
+*.h5
+.pytest_cache/
+.vscode/
+
+# Temporary inspection scripts
+inspect_rainfall_files_temp.py
