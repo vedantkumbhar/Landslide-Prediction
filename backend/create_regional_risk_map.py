@@ -1,6 +1,4 @@
 
-# -*- coding: cp1252 -*-
-
 from pathlib import Path
 import html
 
@@ -10,11 +8,20 @@ from branca.colormap import LinearColormap
 
 BASE = Path(__file__).resolve().parents[1]
 
-INPUT = BASE / "data/processed/rainfall/regional_gpm_risk_predictions_01nov2026.csv"
+INPUT = (
+    BASE
+    / "data/processed/rainfall/refresh_runs/20261102_152742"
+    / "predictions"
+    / "regional_gpm_risk_predictions_02nov2026_with_3h.csv"
+)
 
-OUTPUT = BASE / "outputs/regional_landslide_risk_map_esri_01nov2026.html"
+OUTPUT = (
+    BASE
+    / "outputs/regional_landslide_risk_map_esri_02nov2026.html"
+)
 
 RAIN_COLUMNS = {
+    "1-hour rainfall": "gpm_1h_accumulation_mm",
     "3-hour rainfall": "gpm_3h_accumulation_mm",
     "6-hour rainfall": "gpm_6h_accumulation_mm",
     "12-hour rainfall": "gpm_12h_accumulation_mm",
@@ -34,6 +41,9 @@ def safe(value):
 
 def main():
 
+    print("\nREGIONAL LANDSLIDE RISK MAP")
+    print("=" * 60)
+
     if OUTPUT.exists():
         raise FileExistsError(
             f"Map already exists; refusing to overwrite: {OUTPUT}"
@@ -45,29 +55,70 @@ def main():
     df = pd.read_csv(INPUT)
 
     required = [
+        "record_id",
         "latitude",
         "longitude",
         "dem_region",
         "terrain_model_score",
-        *RAIN_COLUMNS.values(),
         "elevation_m",
         "slope_degrees",
-        "rainfall_observation_end_utc",
+        "gpm_24h_series_start_utc",
+        "gpm_24h_series_end_utc",
+        *RAIN_COLUMNS.values(),
     ]
 
-    missing = [c for c in required if c not in df.columns]
+    missing = [column for column in required if column not in df.columns]
 
     if missing:
-        raise ValueError(f"Missing columns: {missing}")
+        raise ValueError(f"Missing required columns: {missing}")
 
     if df[required].isna().any().any():
-        raise ValueError("Missing values found in map fields.")
+        raise ValueError("Missing values found in required map fields.")
+
+    if df["record_id"].duplicated().any():
+        raise ValueError("Duplicate record IDs found.")
 
     if not df["dem_region"].isin(REGIONS).all():
         raise ValueError("Unexpected region values found.")
 
     if not df["terrain_model_score"].between(0, 1).all():
-        raise ValueError("Terrain model scores must be between 0 and 1.")
+        raise ValueError("Terrain scores must be between 0 and 1.")
+
+    if not df["latitude"].between(-90, 90).all():
+        raise ValueError("Invalid latitude values.")
+
+    if not df["longitude"].between(-180, 180).all():
+        raise ValueError("Invalid longitude values.")
+
+    for column in RAIN_COLUMNS.values():
+
+        if (df[column] < 0).any():
+            raise ValueError(f"Negative rainfall values in {column}")
+
+    # Check rainfall accumulation consistency.
+    accumulation_pairs = [
+        ("gpm_1h_accumulation_mm", "gpm_3h_accumulation_mm"),
+        ("gpm_3h_accumulation_mm", "gpm_6h_accumulation_mm"),
+        ("gpm_6h_accumulation_mm", "gpm_12h_accumulation_mm"),
+        ("gpm_12h_accumulation_mm", "gpm_24h_accumulation_mm"),
+    ]
+
+    for shorter, longer in accumulation_pairs:
+
+        if (df[shorter] > df[longer] + 1e-5).any():
+            raise ValueError(
+                f"Rainfall accumulation inconsistency: "
+                f"{shorter} exceeds {longer}"
+            )
+
+    start_times = df["gpm_24h_series_start_utc"].unique()
+    end_times = df["gpm_24h_series_end_utc"].unique()
+
+    if len(start_times) != 1 or len(end_times) != 1:
+        raise ValueError("Inconsistent 24-hour observation timestamps.")
+
+    observation_start = start_times[0]
+    observation_end = end_times[0]
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
 
@@ -76,7 +127,6 @@ def main():
         df["longitude"].mean(),
     ]
 
-    # Create map without the blocked OpenStreetMap tiles.
     map_object = folium.Map(
         location=center,
         zoom_start=5,
@@ -84,7 +134,6 @@ def main():
         control_scale=True,
     )
 
-    # Esri topographic basemap.
     folium.TileLayer(
         tiles=(
             "https://server.arcgisonline.com/ArcGIS/rest/services/"
@@ -97,7 +146,7 @@ def main():
         show=True,
     ).add_to(map_object)
 
-    # Terrain model score legend.
+    # Terrain-only model score legend.
     colormap = LinearColormap(
         colors=["green", "yellow", "orange", "red"],
         vmin=0,
@@ -110,7 +159,7 @@ def main():
 
     colormap.add_to(map_object)
 
-    # Regional layers.
+    # Separate regional layers.
     for region in REGIONS:
 
         region_data = df[df["dem_region"] == region]
@@ -126,37 +175,55 @@ def main():
             color = colormap(score)
 
             rainfall_html = "".join(
-                f"<tr><td>{safe(label)}</td>"
-                f"<td>{float(row[column]):.2f} mm</td></tr>"
+                f"<tr>"
+                f"<td>{safe(label)}</td>"
+                f"<td>{float(row[column]):.3f} mm</td>"
+                f"</tr>"
                 for label, column in RAIN_COLUMNS.items()
             )
 
             popup_html = f"""
-            <div style="width:260px">
+            <div style="width:280px; font-family:Arial">
+
                 <h4>{safe(region)}</h4>
 
+                <b>Record ID:</b> {safe(row['record_id'])}<br>
+
                 <b>Terrain model score:</b> {score:.3f}<br>
+
                 <b>Latitude:</b> {float(row['latitude']):.5f}<br>
+
                 <b>Longitude:</b> {float(row['longitude']):.5f}<br>
+
                 <b>Elevation:</b> {float(row['elevation_m']):.1f} m<br>
-                <b>Slope:</b> {float(row['slope_degrees']):.2f} degrees<br>
+
+                <b>Slope:</b> {float(row['slope_degrees']):.2f} degrees
 
                 <hr>
 
-                <b>GPM rainfall accumulation</b>
-                <table>{rainfall_html}</table>
+                <b>NASA GPM IMERG rainfall</b>
+
+                <table style="width:100%">
+                    {rainfall_html}
+                </table>
 
                 <hr>
 
-                <b>Observation end (UTC):</b><br>
-                {safe(row['rainfall_observation_end_utc'])}
+                <b>24-hour observation window (UTC)</b><br>
+
+                {safe(observation_start)}<br>
+                to<br>
+                {safe(observation_end)}
 
                 <hr>
 
                 <small>
-                Terrain-only model score. Rainfall is displayed
-                separately and is not yet incorporated into the model.
+                The terrain model score is terrain-only and is not
+                a calibrated landslide probability. Rainfall values
+                are displayed separately and are not yet incorporated
+                into the model.
                 </small>
+
             </div>
             """
 
@@ -173,36 +240,44 @@ def main():
                 fill_opacity=0.75,
                 popup=folium.Popup(
                     popup_html,
-                    max_width=320,
+                    max_width=340,
                 ),
-                tooltip=f"{region} | Score: {score:.3f}",
+                tooltip=(
+                    f"{region} | "
+                    f"Terrain score: {score:.3f} | "
+                    f"24h rainfall: "
+                    f"{float(row['gpm_24h_accumulation_mm']):.2f} mm"
+                ),
             ).add_to(layer)
 
         layer.add_to(map_object)
 
-        print(
-            f"Added {len(region_data)} points: {region}"
-        )
+        print(f"Added {len(region_data)} points: {region}")
 
-    # Regional layer selector.
     folium.LayerControl(
         collapsed=False
     ).add_to(map_object)
 
-    # Map title.
-    title_html = """
+    title_html = f"""
     <div style="
         position: fixed;
         top: 10px;
         left: 50px;
         z-index: 9999;
         background: white;
-        padding: 10px 14px;
+        padding: 12px 15px;
         border: 1px solid #777;
-        border-radius: 5px;">
+        border-radius: 5px;
+        max-width: 380px;">
 
-        <b>Regional Landslide Prediction – GPM Integration</b><br>
-        <small>Snapshot: 01 November 2026 | NASA GPM IMERG</small>
+        <b>Regional Landslide Monitoring – NASA GPM IMERG</b><br>
+
+        <small>
+        Snapshot: 02 November 2026<br>
+        Observation: {safe(observation_start)} to
+        {safe(observation_end)}<br>
+        2,009 regional records
+        </small>
 
     </div>
     """
@@ -211,11 +286,13 @@ def main():
         folium.Element(title_html)
     )
 
-    # Save map.
     map_object.save(str(OUTPUT))
 
     print("\nMAP CREATED SUCCESSFULLY")
-    print("Records:", len(df))
+    print("Total records:", len(df))
+    print("Rainfall windows:", len(RAIN_COLUMNS))
+    print("Observation start:", observation_start)
+    print("Observation end:", observation_end)
     print("Output:", OUTPUT)
 
 
