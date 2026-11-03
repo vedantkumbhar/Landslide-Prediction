@@ -1,5 +1,5 @@
-
 from pathlib import Path
+import argparse
 
 import numpy as np
 import pandas as pd
@@ -8,26 +8,59 @@ import h5py
 from backend.gpm_refresh.refresh_config import (
     PROJECT_ROOT,
     get_run_directory,
+    GPM_INTERVAL_MINUTES,
+    EXPECTED_GRANULE_SHAPE,
+    MAX_MATCH_DISTANCE_KM,
 )
 
-RUN_ID = "20261102_152742"
 
-INPUT_CSV = (
+DEFAULT_INPUT_CSV = (
     PROJECT_ROOT
     / "data/processed/regional_training_dataset_30oct.csv"
 )
 
-GRANULE_DIR = get_run_directory(RUN_ID) / "downloads" / "12h"
-
-OUTPUT_CSV = (
-    get_run_directory(RUN_ID)
-    / "extracted"
-    / "gpm_regional_rainfall_12h.csv"
-)
-
-EXPECTED_GRANULES = 24
-MAX_MATCH_DISTANCE_KM = 8.0
 FILL_FALLBACK = -9999.9
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Extract dynamic 12-hour NASA GPM IMERG rainfall."
+    )
+
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--start-time", required=True)
+
+    parser.add_argument(
+        "--input-csv",
+        type=Path,
+        default=DEFAULT_INPUT_CSV,
+    )
+
+    parser.add_argument("--granule-dir", type=Path)
+    parser.add_argument("--output-csv", type=Path)
+
+    parser.add_argument(
+        "--expected-granules",
+        type=int,
+        default=24,
+    )
+
+    parser.add_argument(
+        "--max-match-distance-km",
+        type=float,
+        default=MAX_MATCH_DISTANCE_KM,
+    )
+
+    return parser.parse_args()
+
+
+def parse_utc_timestamp(value):
+    timestamp = pd.Timestamp(value)
+
+    if timestamp.tzinfo is None:
+        return timestamp.tz_localize("UTC")
+
+    return timestamp.tz_convert("UTC")
 
 
 def read_fill(dataset):
@@ -39,8 +72,9 @@ def read_time_bounds(h5):
     raw = np.asarray(h5["Grid/time_bnds"])[0]
 
     units = h5["Grid/time"].attrs["units"]
+
     if isinstance(units, bytes):
-        units = units.decode()
+        units = units.decode("utf-8")
 
     origin = units.split("since", 1)[1].strip()
     base = pd.Timestamp(origin)
@@ -74,55 +108,77 @@ def haversine_km(lat1, lon1, lat2, lon2):
     return 2 * radius * np.arcsin(np.sqrt(a))
 
 
-def main():
+def load_input(input_csv):
+    if not input_csv.exists():
+        raise FileNotFoundError(input_csv)
 
-    print("\nNASA GPM REFRESH: 12-HOUR EXTRACTION")
-    print("=" * 65)
+    df = pd.read_csv(input_csv)
 
-    if not INPUT_CSV.exists():
-        raise FileNotFoundError(INPUT_CSV)
-
-    if OUTPUT_CSV.exists():
-        raise FileExistsError(
-            f"Refusing to overwrite: {OUTPUT_CSV}"
-        )
-
-    df = pd.read_csv(INPUT_CSV)
-
-    required = {
+    required = [
         "record_id",
         "latitude",
         "longitude",
         "dem_region",
-    }
+    ]
 
-    missing = required - set(df.columns)
+    missing = [column for column in required if column not in df.columns]
 
     if missing:
-        raise ValueError(
-            f"Missing input columns: {sorted(missing)}"
-        )
+        raise ValueError(f"Missing input columns: {missing}")
+
+    if df["record_id"].isna().any():
+        raise ValueError("Missing record IDs.")
 
     if df["record_id"].duplicated().any():
-        raise ValueError("Duplicate record_id values found.")
+        raise ValueError("Duplicate record IDs.")
 
-    files = sorted(GRANULE_DIR.glob("*.HDF5"))
+    for column, minimum, maximum in [
+        ("latitude", -90, 90),
+        ("longitude", -180, 180),
+    ]:
+        df[column] = pd.to_numeric(df[column], errors="coerce")
 
-    if len(files) != EXPECTED_GRANULES:
+        if (
+            df[column].isna().any()
+            or not np.isfinite(df[column]).all()
+            or not df[column].between(minimum, maximum).all()
+        ):
+            raise ValueError(f"Invalid coordinates: {column}")
+
+    if df["dem_region"].isna().any():
+        raise ValueError("Missing regional assignments.")
+
+    return df
+
+
+def validate_granules(files, expected_start, expected_count):
+    if len(files) != expected_count:
         raise ValueError(
-            f"Expected 24 granules in {GRANULE_DIR}, "
-            f"found {len(files)}."
+            f"Expected {expected_count} granules, found {len(files)}."
         )
 
     metadata = []
-
     reference_lat = None
     reference_lon = None
 
-    # Validate all granules
     for path in files:
-
         with h5py.File(path, "r") as h5:
+
+            required_datasets = [
+                "Grid/time",
+                "Grid/time_bnds",
+                "Grid/precipitation",
+                "Grid/precipitationQualityIndex",
+                "Grid/randomError",
+                "Grid/lat",
+                "Grid/lon",
+            ]
+
+            for dataset in required_datasets:
+                if dataset not in h5:
+                    raise ValueError(
+                        f"Missing {dataset} in {path.name}"
+                    )
 
             start, end = read_time_bounds(h5)
 
@@ -130,28 +186,47 @@ def main():
             quality = h5["Grid/precipitationQualityIndex"]
             error = h5["Grid/randomError"]
 
-            lat = np.asarray(h5["Grid/lat"][:], dtype=float)
-            lon = np.asarray(h5["Grid/lon"][:], dtype=float)
-
-            if precip.shape != (1, 3600, 1800):
+            if precip.shape != EXPECTED_GRANULE_SHAPE:
                 raise ValueError(
                     f"Unexpected precipitation shape: {path.name}"
                 )
 
-            if quality.shape != precip.shape:
+            if quality.shape != precip.shape or error.shape != precip.shape:
                 raise ValueError(
-                    f"Quality shape mismatch: {path.name}"
+                    f"Quality/error shape mismatch: {path.name}"
                 )
 
-            if error.shape != precip.shape:
-                raise ValueError(
-                    f"Random error shape mismatch: {path.name}"
-                )
-
-            if end - start != pd.Timedelta(minutes=30):
+            if end - start != pd.Timedelta(
+                minutes=GPM_INTERVAL_MINUTES
+            ):
                 raise ValueError(
                     f"Invalid interval duration: {path.name}"
                 )
+
+            units = precip.attrs.get("units", b"")
+
+            if isinstance(units, bytes):
+                units = units.decode("utf-8")
+
+            if units.strip() != "mm/hr":
+                raise ValueError(
+                    f"Unexpected precipitation units in {path.name}: {units}"
+                )
+
+            lat = np.asarray(h5["Grid/lat"][:], dtype=float)
+            lon = np.asarray(h5["Grid/lon"][:], dtype=float)
+
+            if lat.ndim != 1 or lon.ndim != 1:
+                raise ValueError("Unexpected GPM coordinate dimensions.")
+
+            if (
+                len(lon) != precip.shape[1]
+                or len(lat) != precip.shape[2]
+            ):
+                raise ValueError("GPM grid coordinate dimensions mismatch.")
+
+            if not np.isfinite(lat).all() or not np.isfinite(lon).all():
+                raise ValueError("Non-finite GPM grid coordinates.")
 
             if reference_lat is None:
                 reference_lat = lat
@@ -167,32 +242,110 @@ def main():
 
             metadata.append((path, start, end))
 
-            print(
-                f"Validated: {path.name} | {start} to {end}"
-            )
-
     metadata.sort(key=lambda item: item[1])
 
-    # Check continuity
-    for i in range(1, len(metadata)):
-
-        if metadata[i][1] != metadata[i - 1][2]:
-            raise ValueError(
-                "Gap or overlap in the 12-hour granule sequence."
-            )
-
-    total_duration = metadata[-1][2] - metadata[0][1]
-
-    if total_duration != pd.Timedelta(hours=12):
-        raise ValueError(
-            f"Expected 12-hour coverage, got {total_duration}."
+    for index, (_, start, end) in enumerate(metadata):
+        expected_time = expected_start + pd.Timedelta(
+            minutes=index * GPM_INTERVAL_MINUTES
         )
 
-    print("\nAll 24 granules passed time and grid validation.")
+        if start != expected_time:
+            raise ValueError(
+                f"Unexpected granule start: {start}; "
+                f"expected {expected_time}"
+            )
 
-    # Map regional records to nearest GPM grid cells
-    record_lat = df["latitude"].to_numpy()
-    record_lon = df["longitude"].to_numpy()
+        if index > 0 and start != metadata[index - 1][2]:
+            raise ValueError("Gap or overlap in the granule sequence.")
+
+        if end - start != pd.Timedelta(
+            minutes=GPM_INTERVAL_MINUTES
+        ):
+            raise ValueError("Invalid granule interval.")
+
+    expected_end = expected_start + pd.Timedelta(hours=12)
+
+    if metadata[-1][2] != expected_end:
+        raise ValueError(
+            f"Expected 12-hour coverage ending at {expected_end}, "
+            f"found {metadata[-1][2]}."
+        )
+
+    return metadata, reference_lat, reference_lon
+
+
+def extract_dataset(dataset, lon_min, lon_max, lat_min, lat_max,
+                    lon_idx, lat_idx):
+    values = np.asarray(
+        dataset[
+            0,
+            lon_min:lon_max + 1,
+            lat_min:lat_max + 1,
+        ],
+        dtype=np.float64,
+    )
+
+    fill = read_fill(dataset)
+
+    values[
+        ~np.isfinite(values)
+        | np.isclose(values, fill)
+    ] = np.nan
+
+    return values[
+        lon_idx - lon_min,
+        lat_idx - lat_min,
+    ]
+
+
+def main(args):
+    if args.expected_granules != (
+        12 * 60 // GPM_INTERVAL_MINUTES
+    ):
+        raise ValueError(
+            "A 12-hour window requires exactly 24 half-hour granules."
+        )
+
+    if args.max_match_distance_km <= 0:
+        raise ValueError("--max-match-distance-km must be positive.")
+
+    expected_start = parse_utc_timestamp(args.start_time)
+
+    run_dir = get_run_directory(args.run_id)
+
+    granule_dir = args.granule_dir or (
+        run_dir / "downloads" / "12h"
+    )
+
+    output_csv = args.output_csv or (
+        run_dir / "extracted" / "gpm_regional_rainfall_12h.csv"
+    )
+
+    if output_csv.exists():
+        raise FileExistsError(
+            f"Refusing to overwrite existing output: {output_csv}"
+        )
+
+    df = load_input(args.input_csv)
+
+    files = sorted(granule_dir.glob("*.HDF5"))
+
+    metadata, reference_lat, reference_lon = validate_granules(
+        files,
+        expected_start,
+        args.expected_granules,
+    )
+
+    print("\nNASA GPM: DYNAMIC 12-HOUR EXTRACTION")
+    print("=" * 65)
+    print("Run ID:", args.run_id)
+    print("Input records:", len(df))
+    print("Validated granules:", len(metadata))
+    print("Observation start:", metadata[0][1])
+    print("Observation end:", metadata[-1][2])
+
+    record_lat = df["latitude"].to_numpy(dtype=float)
+    record_lon = df["longitude"].to_numpy(dtype=float)
 
     lat_idx = np.abs(
         reference_lat[:, None] - record_lat[None, :]
@@ -209,158 +362,91 @@ def main():
         reference_lon[lon_idx],
     )
 
-    if np.any(distances > MAX_MATCH_DISTANCE_KM):
+    if np.any(distances > args.max_match_distance_km):
         raise ValueError(
-            f"Grid match exceeds {MAX_MATCH_DISTANCE_KM} km. "
+            f"GPM match exceeds {args.max_match_distance_km} km. "
             f"Maximum: {distances.max():.3f} km"
         )
 
-    print(
-        f"Unique GPM cells: "
-        f"{len(set(zip(lon_idx, lat_idx)))}"
-    )
+    lon_min, lon_max = lon_idx.min(), lon_idx.max()
+    lat_min, lat_max = lat_idx.min(), lat_idx.max()
 
-    print(
-        f"Maximum grid match distance: "
-        f"{distances.max():.3f} km"
-    )
-
-    # Extract rainfall from all 24 granules
     rain_depths = []
-
-    latest_rate = None
     latest_quality = None
     latest_error = None
 
-    lon_min = lon_idx.min()
-    lon_max = lon_idx.max()
-
-    lat_min = lat_idx.min()
-    lat_max = lat_idx.max()
-
-    for i, (path, start, end) in enumerate(metadata):
-
+    for index, (path, start, end) in enumerate(metadata):
         with h5py.File(path, "r") as h5:
 
-            def extract(dataset):
-
-                values = np.asarray(
-                    dataset[
-                        0,
-                        lon_min:lon_max + 1,
-                        lat_min:lat_max + 1
-                    ],
-                    dtype=np.float64,
-                )
-
-                fill = read_fill(dataset)
-
-                values[
-                    ~np.isfinite(values)
-                    | np.isclose(values, fill)
-                ] = np.nan
-
-                return values[
-                    lon_idx - lon_min,
-                    lat_idx - lat_min
-                ]
-
-            rate = extract(h5["Grid/precipitation"])
-
-            quality = extract(
-                h5["Grid/precipitationQualityIndex"]
+            rate = extract_dataset(
+                h5["Grid/precipitation"],
+                lon_min, lon_max, lat_min, lat_max,
+                lon_idx, lat_idx,
             )
 
-            error = extract(h5["Grid/randomError"])
+            quality = extract_dataset(
+                h5["Grid/precipitationQualityIndex"],
+                lon_min, lon_max, lat_min, lat_max,
+                lon_idx, lat_idx,
+            )
 
-            # Convert mm/hr to 30-minute rainfall depth
+            error = extract_dataset(
+                h5["Grid/randomError"],
+                lon_min, lon_max, lat_min, lat_max,
+                lon_idx, lat_idx,
+            )
+
             rain_depths.append(rate * 0.5)
 
-            if i == len(metadata) - 1:
-
-                latest_rate = rate
+            if index == len(metadata) - 1:
                 latest_quality = quality
                 latest_error = error
 
-        print(f"Extracted: {path.name}")
+        print("Extracted:", path.name)
 
     rain_depths = np.vstack(rain_depths)
 
     valid_count = np.isfinite(rain_depths).sum(axis=0)
 
-    # Latest 1-hour rainfall: last two intervals
     latest_1h = rain_depths[-2:]
+    latest_6h = rain_depths[-12:]
 
     rainfall_1h = np.nansum(latest_1h, axis=0)
     rainfall_1h[~np.isfinite(latest_1h).all(axis=0)] = np.nan
 
-    # Latest 6-hour rainfall: last twelve intervals
-    latest_6h = rain_depths[-12:]
-
     rainfall_6h = np.nansum(latest_6h, axis=0)
     rainfall_6h[~np.isfinite(latest_6h).all(axis=0)] = np.nan
 
-    # Complete 12-hour rainfall: all 24 intervals
     rainfall_12h = np.nansum(rain_depths, axis=0)
     rainfall_12h[~np.isfinite(rain_depths).all(axis=0)] = np.nan
 
-    # Add extracted features
-    df["gpm_latest_rate_mm_hr"] = latest_rate
-    df["gpm_1h_accumulation_mm"] = rainfall_1h
-    df["gpm_6h_accumulation_mm"] = rainfall_6h
     df["gpm_12h_accumulation_mm"] = rainfall_12h
+    df["gpm_12h_valid_30min_intervals"] = valid_count
+    df["gpm_12h_latest_quality_index"] = latest_quality
+    df["gpm_12h_latest_random_error_mm_hr"] = latest_error
+    df["gpm_12h_grid_match_distance_km"] = distances
 
-    df["gpm_valid_30min_intervals"] = valid_count
-
-    df["gpm_latest_quality_index"] = latest_quality
-    df["gpm_latest_random_error_mm_hr"] = latest_error
-
-    df["gpm_grid_match_distance_km"] = distances
-
-    df["gpm_series_start_utc"] = metadata[0][1].isoformat()
-    df["gpm_series_end_utc"] = metadata[-1][2].isoformat()
+    df["gpm_12h_series_start_utc"] = metadata[0][1].isoformat()
+    df["gpm_12h_series_end_utc"] = metadata[-1][2].isoformat()
 
     df["gpm_product"] = "NASA GPM IMERG V07C"
 
-    # Save output
-    OUTPUT_CSV.parent.mkdir(
-        parents=True,
-        exist_ok=True
-    )
+    if df["gpm_12h_accumulation_mm"].isna().any():
+        raise ValueError(
+            "Incomplete 12-hour rainfall values. Refusing to save."
+        )
 
-    df.to_csv(OUTPUT_CSV, index=False)
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(output_csv, index=False)
 
     print("\n========== 12-HOUR EXTRACTION SUMMARY ==========")
-
-    print(f"Output records: {len(df)}")
-    print(f"Unique record IDs: {df['record_id'].nunique()}")
-
-    print(
-        "Valid 1-hour accumulations:",
-        df["gpm_1h_accumulation_mm"].notna().sum()
-    )
-
-    print(
-        "Valid 6-hour accumulations:",
-        df["gpm_6h_accumulation_mm"].notna().sum()
-    )
-
-    print(
-        "Valid 12-hour accumulations:",
-        df["gpm_12h_accumulation_mm"].notna().sum()
-    )
-
-    print("\nRegional 12-hour rainfall statistics:")
-
-    print(
-        df.groupby("dem_region")["gpm_12h_accumulation_mm"]
-        .agg(["count", "mean", "max"])
-    )
-
-    print(f"\nSaved: {OUTPUT_CSV}")
-
-    print("\nGPM 12-HOUR EXTRACTION COMPLETED.")
+    print("Records:", len(df))
+    print("Valid 12-hour values:", df["gpm_12h_accumulation_mm"].notna().sum())
+    print("Maximum grid distance:", f"{distances.max():.3f} km")
+    print("Observation:", metadata[0][1], "to", metadata[-1][2])
+    print("Saved:", output_csv)
+    print("\n12-HOUR EXTRACTION COMPLETED.")
 
 
 if __name__ == "__main__":
-    main()
+    main(parse_args())

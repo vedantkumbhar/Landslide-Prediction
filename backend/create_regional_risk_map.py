@@ -1,21 +1,23 @@
 
 from pathlib import Path
+import argparse
 import html
 
 import pandas as pd
 import folium
 from branca.colormap import LinearColormap
 
+
 BASE = Path(__file__).resolve().parents[1]
 
-INPUT = (
+DEFAULT_INPUT = (
     BASE
     / "data/processed/rainfall/refresh_runs/20261102_152742"
     / "predictions"
     / "regional_gpm_risk_predictions_02nov2026_with_3h.csv"
 )
 
-OUTPUT = (
+DEFAULT_OUTPUT = (
     BASE
     / "outputs/regional_landslide_risk_map_esri_02nov2026.html"
 )
@@ -39,20 +41,47 @@ def safe(value):
     return html.escape(str(value))
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Generate the regional GPM landslide monitoring map."
+    )
+
+    parser.add_argument(
+        "--input-csv",
+        type=Path,
+        default=DEFAULT_INPUT,
+    )
+
+    parser.add_argument(
+        "--output-map",
+        type=Path,
+        default=DEFAULT_OUTPUT,
+    )
+
+    return parser.parse_args()
+
+
 def main():
+
+    args = parse_args()
+
+    input_csv = args.input_csv
+    output_map = args.output_map
 
     print("\nREGIONAL LANDSLIDE RISK MAP")
     print("=" * 60)
+    print("Input:", input_csv)
+    print("Output:", output_map)
 
-    if OUTPUT.exists():
+    if output_map.exists():
         raise FileExistsError(
-            f"Map already exists; refusing to overwrite: {OUTPUT}"
+            f"Map already exists; refusing to overwrite: {output_map}"
         )
 
-    if not INPUT.exists():
-        raise FileNotFoundError(INPUT)
+    if not input_csv.exists():
+        raise FileNotFoundError(input_csv)
 
-    df = pd.read_csv(INPUT)
+    df = pd.read_csv(input_csv)
 
     required = [
         "record_id",
@@ -91,11 +120,9 @@ def main():
         raise ValueError("Invalid longitude values.")
 
     for column in RAIN_COLUMNS.values():
-
         if (df[column] < 0).any():
             raise ValueError(f"Negative rainfall values in {column}")
 
-    # Check rainfall accumulation consistency.
     accumulation_pairs = [
         ("gpm_1h_accumulation_mm", "gpm_3h_accumulation_mm"),
         ("gpm_3h_accumulation_mm", "gpm_6h_accumulation_mm"),
@@ -104,7 +131,6 @@ def main():
     ]
 
     for shorter, longer in accumulation_pairs:
-
         if (df[shorter] > df[longer] + 1e-5).any():
             raise ValueError(
                 f"Rainfall accumulation inconsistency: "
@@ -120,7 +146,7 @@ def main():
     observation_start = start_times[0]
     observation_end = end_times[0]
 
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    output_map.parent.mkdir(parents=True, exist_ok=True)
 
     center = [
         df["latitude"].mean(),
@@ -146,7 +172,6 @@ def main():
         show=True,
     ).add_to(map_object)
 
-    # Terrain-only model score legend.
     colormap = LinearColormap(
         colors=["green", "yellow", "orange", "red"],
         vmin=0,
@@ -159,13 +184,18 @@ def main():
 
     colormap.add_to(map_object)
 
-    # Separate regional layers.
     for region in REGIONS:
 
         region_data = df[df["dem_region"] == region]
 
+        layer_name = (
+            "Western Maharashtra pilot"
+            if region == "Western Maharashtra"
+            else region
+        )
+
         layer = folium.FeatureGroup(
-            name=f"{region} ({len(region_data)} records)",
+            name=f"{layer_name} ({len(region_data)} records)",
             show=True,
         )
 
@@ -185,7 +215,7 @@ def main():
             popup_html = f"""
             <div style="width:280px; font-family:Arial">
 
-                <h4>{safe(region)}</h4>
+                <h4>{safe(layer_name)}</h4>
 
                 <b>Record ID:</b> {safe(row['record_id'])}<br>
 
@@ -243,7 +273,7 @@ def main():
                     max_width=340,
                 ),
                 tooltip=(
-                    f"{region} | "
+                    f"{layer_name} | "
                     f"Terrain score: {score:.3f} | "
                     f"24h rainfall: "
                     f"{float(row['gpm_24h_accumulation_mm']):.2f} mm"
@@ -252,11 +282,9 @@ def main():
 
         layer.add_to(map_object)
 
-        print(f"Added {len(region_data)} points: {region}")
+        print(f"Added {len(region_data)} points: {layer_name}")
 
-    folium.LayerControl(
-        collapsed=False
-    ).add_to(map_object)
+    folium.LayerControl(collapsed=False).add_to(map_object)
 
     title_html = f"""
     <div style="
@@ -273,10 +301,10 @@ def main():
         <b>Regional Landslide Monitoring – NASA GPM IMERG</b><br>
 
         <small>
-        Snapshot: 02 November 2026<br>
+        Total records: {len(df):,}<br>
         Observation: {safe(observation_start)} to
-        {safe(observation_end)}<br>
-        2,009 regional records
+        {safe(observation_end)} UTC<br>
+        Western Maharashtra data represents a limited pilot.
         </small>
 
     </div>
@@ -286,14 +314,14 @@ def main():
         folium.Element(title_html)
     )
 
-    map_object.save(str(OUTPUT))
+    map_object.save(str(output_map))
 
     print("\nMAP CREATED SUCCESSFULLY")
     print("Total records:", len(df))
     print("Rainfall windows:", len(RAIN_COLUMNS))
     print("Observation start:", observation_start)
     print("Observation end:", observation_end)
-    print("Output:", OUTPUT)
+    print("Output:", output_map)
 
 
 if __name__ == "__main__":

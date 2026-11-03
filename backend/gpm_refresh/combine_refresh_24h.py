@@ -1,7 +1,6 @@
-
 from pathlib import Path
+import argparse
 
-import numpy as np
 import pandas as pd
 
 from backend.gpm_refresh.refresh_config import (
@@ -10,54 +9,102 @@ from backend.gpm_refresh.refresh_config import (
 )
 
 
-# Input files
-PREVIOUS_CSV = (
-    get_run_directory("20261102_previous12h")
-    / "extracted"
-    / "gpm_regional_rainfall_previous12h.csv"
-)
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Combine previous and latest 12-hour GPM rainfall windows."
+    )
 
-LATEST_CSV = (
-    get_run_directory("20261102_152742")
-    / "extracted"
-    / "gpm_regional_rainfall_12h.csv"
-)
+    parser.add_argument("--previous-run-id", required=True)
+    parser.add_argument("--latest-run-id", required=True)
+    parser.add_argument("--previous-csv", required=True)
+    parser.add_argument("--latest-csv", required=True)
+    parser.add_argument("--output-csv", default=None)
+    parser.add_argument("--expected-records", type=int, default=None)
+    parser.add_argument("--expected-intervals", type=int, default=48)
 
-# Separate output file
-OUTPUT_CSV = (
-    get_run_directory("20261102_152742")
-    / "extracted"
-    / "gpm_regional_rainfall_24h.csv"
-)
+    return parser.parse_args()
+
+
+def get_series_boundary(df, column, dataset_name):
+    if column not in df.columns:
+        raise ValueError(
+            f"Missing timestamp column in {dataset_name}: {column}"
+        )
+
+    values = pd.to_datetime(df[column], utc=True, errors="coerce")
+
+    if values.isna().any():
+        raise ValueError(
+            f"Invalid timestamps found in {dataset_name}: {column}"
+        )
+
+    unique_values = values.unique()
+
+    if len(unique_values) != 1:
+        raise ValueError(
+            f"{dataset_name} contains inconsistent values in {column}."
+        )
+
+    return values.iloc[0]
 
 
 def main():
+    args = parse_args()
 
-    print("\nNASA GPM: CONTINUOUS 24-HOUR DATASET")
-    print("=" * 65)
+    previous_csv = Path(args.previous_csv)
+    latest_csv = Path(args.latest_csv)
 
-    if not PREVIOUS_CSV.exists():
-        raise FileNotFoundError(PREVIOUS_CSV)
+    if not previous_csv.is_absolute():
+        previous_csv = PROJECT_ROOT / previous_csv
 
-    if not LATEST_CSV.exists():
-        raise FileNotFoundError(LATEST_CSV)
+    if not latest_csv.is_absolute():
+        latest_csv = PROJECT_ROOT / latest_csv
 
-    if OUTPUT_CSV.exists():
-        raise FileExistsError(
-            f"Refusing to overwrite: {OUTPUT_CSV}"
+    if not previous_csv.exists():
+        raise FileNotFoundError(
+            f"Previous 12-hour CSV not found: {previous_csv}"
         )
 
-    previous = pd.read_csv(PREVIOUS_CSV)
-    latest = pd.read_csv(LATEST_CSV)
+    if not latest_csv.exists():
+        raise FileNotFoundError(
+            f"Latest 12-hour CSV not found: {latest_csv}"
+        )
 
-    print("Previous records:", len(previous))
+    previous = pd.read_csv(previous_csv)
+    latest = pd.read_csv(latest_csv)
+
+    print("\nPrevious records:", len(previous))
     print("Latest records:", len(latest))
 
-    # Validate record identifiers
+    required_common = {
+        "record_id",
+        "latitude",
+        "longitude",
+        "dem_region",
+        "gpm_12h_series_start_utc",
+        "gpm_12h_series_end_utc",
+        "gpm_12h_accumulation_mm",
+        "gpm_12h_valid_30min_intervals",
+    }
+
     for name, frame in [
         ("Previous", previous),
         ("Latest", latest),
     ]:
+        missing = required_common - set(frame.columns)
+
+        if missing:
+            raise ValueError(
+                f"Missing required columns in {name} dataset: "
+                f"{sorted(missing)}"
+            )
+
+        if frame.empty:
+            raise ValueError(f"{name} dataset is empty.")
+
+        if frame["record_id"].isna().any():
+            raise ValueError(f"Missing record_id values in {name} dataset.")
+
         if frame["record_id"].duplicated().any():
             raise ValueError(
                 f"Duplicate record IDs in {name} dataset."
@@ -68,198 +115,159 @@ def main():
             "Record IDs differ between the two datasets."
         )
 
-    # Sort both datasets consistently
     previous = previous.sort_values("record_id").reset_index(drop=True)
     latest = latest.sort_values("record_id").reset_index(drop=True)
 
-    # Verify spatial and regional alignment
-    for column in [
-        "latitude",
-        "longitude",
-        "dem_region",
-    ]:
+    for column in ["latitude", "longitude", "dem_region"]:
         if not previous[column].equals(latest[column]):
             raise ValueError(
                 f"Mismatch in {column} between datasets."
             )
 
-    # Verify exact temporal continuity
-    previous_start = pd.Timestamp(
-        previous["gpm_series_start_utc"].iloc[0]
+    previous_start = get_series_boundary(
+        previous, "gpm_12h_series_start_utc", "Previous"
+    )
+    previous_end = get_series_boundary(
+        previous, "gpm_12h_series_end_utc", "Previous"
+    )
+    latest_start = get_series_boundary(
+        latest, "gpm_12h_series_start_utc", "Latest"
+    )
+    latest_end = get_series_boundary(
+        latest, "gpm_12h_series_end_utc", "Latest"
     )
 
-    previous_end = pd.Timestamp(
-        previous["gpm_series_end_utc"].iloc[0]
-    )
-
-    latest_start = pd.Timestamp(
-        latest["gpm_series_start_utc"].iloc[0]
-    )
-
-    latest_end = pd.Timestamp(
-        latest["gpm_series_end_utc"].iloc[0]
-    )
-
-    if not (
-        (previous_start == pd.Timestamp("2026-11-01T03:00:00Z"))
-        and (previous_end == pd.Timestamp("2026-11-01T15:00:00Z"))
-        and (latest_start == pd.Timestamp("2026-11-01T15:00:00Z"))
-        and (latest_end == pd.Timestamp("2026-11-02T03:00:00Z"))
-    ):
+    if previous_end - previous_start != pd.Timedelta(hours=12):
         raise ValueError(
-            "Unexpected rainfall time windows."
+            f"Previous dataset is not exactly 12 hours: "
+            f"{previous_start} to {previous_end}."
+        )
+
+    if latest_end - latest_start != pd.Timedelta(hours=12):
+        raise ValueError(
+            f"Latest dataset is not exactly 12 hours: "
+            f"{latest_start} to {latest_end}."
         )
 
     if previous_end != latest_start:
         raise ValueError(
-            "The two rainfall windows are not continuous."
+            "The two 12-hour windows are not contiguous. "
+            f"Previous ends at {previous_end}, "
+            f"latest starts at {latest_start}."
         )
 
-    if latest_end - previous_start != pd.Timedelta(hours=24):
-        raise ValueError(
-            "Combined coverage is not exactly 24 hours."
-        )
+    if previous_end > latest_start:
+        raise ValueError("The 12-hour windows overlap.")
 
-    print("\nTemporal continuity: PASSED")
-    print("24-hour start:", previous_start)
-    print("24-hour end:", latest_end)
-
-    # Validate required rainfall columns
-    required = [
-        "gpm_1h_accumulation_mm",
-        "gpm_6h_accumulation_mm",
-        "gpm_12h_accumulation_mm",
-        "gpm_valid_30min_intervals",
-    ]
-
-    for column in required:
-        if column not in previous.columns:
+    if args.expected_records is not None:
+        if len(previous) != args.expected_records:
             raise ValueError(
-                f"Missing previous feature: {column}"
+                f"Previous record count mismatch: "
+                f"{len(previous)} != {args.expected_records}"
             )
 
-        if column not in latest.columns:
+        if len(latest) != args.expected_records:
             raise ValueError(
-                f"Missing latest feature: {column}"
+                f"Latest record count mismatch: "
+                f"{len(latest)} != {args.expected_records}"
             )
 
-    # Start with latest-window dataset
     combined = latest.copy()
 
-    # Preserve previous-window features with clear names
     previous_columns = [
-        "gpm_latest_rate_mm_hr",
-        "gpm_1h_accumulation_mm",
-        "gpm_6h_accumulation_mm",
-        "gpm_12h_accumulation_mm",
-        "gpm_valid_30min_intervals",
-        "gpm_latest_quality_index",
-        "gpm_latest_random_error_mm_hr",
-        "gpm_grid_match_distance_km",
+        column
+        for column in previous.columns
+        if column not in {
+            "record_id",
+            "latitude",
+            "longitude",
+            "dem_region",
+        }
     ]
 
     for column in previous_columns:
-        if column in previous.columns:
-            combined[
-                "gpm_previous12h_" + column.replace("gpm_", "")
-            ] = previous[column].to_numpy()
+        if column in combined.columns:
+            combined[f"gpm_previous12h_{column}"] = previous[column].values
+        else:
+            combined[column] = previous[column].values
 
-    # Calculate continuous 24-hour rainfall
-    previous_12h = pd.to_numeric(
+    previous_rain = pd.to_numeric(
         previous["gpm_12h_accumulation_mm"],
         errors="coerce",
-    ).to_numpy()
+    )
 
-    latest_12h = pd.to_numeric(
+    latest_rain = pd.to_numeric(
         latest["gpm_12h_accumulation_mm"],
         errors="coerce",
-    ).to_numpy()
-
-    valid_24h = (
-        np.isfinite(previous_12h)
-        & np.isfinite(latest_12h)
     )
 
-    rainfall_24h = np.full(len(combined), np.nan)
+    if previous_rain.isna().any() or latest_rain.isna().any():
+        raise ValueError("Missing rainfall values in one of the 12-hour windows.")
 
-    rainfall_24h[valid_24h] = (
-        previous_12h[valid_24h]
-        + latest_12h[valid_24h]
+    if (previous_rain < 0).any() or (latest_rain < 0).any():
+        raise ValueError("Negative rainfall values detected.")
+
+    combined["gpm_24h_accumulation_mm"] = (
+        previous_rain.values + latest_rain.values
     )
 
-    combined["gpm_24h_accumulation_mm"] = rainfall_24h
-
-    # Total valid half-hour intervals across both windows
     previous_intervals = pd.to_numeric(
-        previous["gpm_valid_30min_intervals"],
+        previous["gpm_12h_valid_30min_intervals"],
         errors="coerce",
-    ).to_numpy()
+    )
 
     latest_intervals = pd.to_numeric(
-        latest["gpm_valid_30min_intervals"],
+        latest["gpm_12h_valid_30min_intervals"],
         errors="coerce",
-    ).to_numpy()
+    )
+
+    if previous_intervals.isna().any() or latest_intervals.isna().any():
+        raise ValueError("Invalid 30-minute interval counts.")
 
     combined["gpm_24h_valid_30min_intervals"] = (
-        previous_intervals + latest_intervals
+        previous_intervals.values + latest_intervals.values
     )
+
+    if not (
+        combined["gpm_24h_valid_30min_intervals"]
+        == args.expected_intervals
+    ).all():
+        raise ValueError(
+            "24-hour interval count validation failed. "
+            f"Expected {args.expected_intervals} intervals."
+        )
 
     combined["gpm_24h_series_start_utc"] = previous_start.isoformat()
     combined["gpm_24h_series_end_utc"] = latest_end.isoformat()
 
-    combined["gpm_24h_product"] = "NASA GPM IMERG V07C"
+    if latest_end - previous_start != pd.Timedelta(hours=24):
+        raise ValueError("Combined rainfall period is not exactly 24 hours.")
 
-    # Final integrity checks
-    if len(combined) != 2009:
-        raise ValueError(
-            f"Unexpected output record count: {len(combined)}"
+    output_csv = (
+        Path(args.output_csv)
+        if args.output_csv
+        else get_run_directory(args.latest_run_id)
+        / "extracted"
+        / "regional_gpm_rainfall_24h.csv"
+    )
+
+    if not output_csv.is_absolute():
+        output_csv = PROJECT_ROOT / output_csv
+
+    if output_csv.exists():
+        raise FileExistsError(
+            f"Output already exists; refusing to overwrite: {output_csv}"
         )
 
-    if combined["record_id"].nunique() != len(combined):
-        raise ValueError("Duplicate record IDs in final output.")
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    combined.to_csv(output_csv, index=False)
 
-    if (combined["gpm_24h_valid_30min_intervals"] > 48).any():
-        raise ValueError("Unexpected interval count above 48.")
-
-    if not (
-        combined["gpm_24h_valid_30min_intervals"] == 48
-    ).all():
-        raise ValueError(
-            "Not all records have 48 valid half-hour intervals."
-        )
-
-    # Save
-    OUTPUT_CSV.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    combined.to_csv(OUTPUT_CSV, index=False)
-
-    print("\n========== 24-HOUR DATASET SUMMARY ==========")
-
-    print("Output records:", len(combined))
-    print("Unique record IDs:", combined["record_id"].nunique())
-
-    print(
-        "Valid 24-hour rainfall:",
-        combined["gpm_24h_accumulation_mm"].notna().sum(),
-    )
-
-    print(
-        "Records with 48 valid intervals:",
-        (combined["gpm_24h_valid_30min_intervals"] == 48).sum(),
-    )
-
-    print("\nRegional 24-hour rainfall statistics:")
-
-    print(
-        combined.groupby("dem_region")["gpm_24h_accumulation_mm"]
-        .agg(["count", "mean", "max"])
-    )
-
-    print("\nSaved:", OUTPUT_CSV)
-    print("\nCONTINUOUS 24-HOUR DATASET CREATED SUCCESSFULLY.")
+    print("\n24-hour combination completed.")
+    print("Output:", output_csv)
+    print("Records:", len(combined))
+    print("24-hour rainfall column: gpm_24h_accumulation_mm")
+    print("24-hour start:", previous_start)
+    print("24-hour end:", latest_end)
 
 
 if __name__ == "__main__":

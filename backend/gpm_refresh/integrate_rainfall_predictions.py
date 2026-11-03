@@ -1,322 +1,303 @@
-
 from pathlib import Path
-import pandas as pd
+import argparse
+
 import numpy as np
+import pandas as pd
 
-from backend.gpm_refresh.refresh_config import get_run_directory
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-RUN_ID = "20261102_152742"
-
-OLD_PREDICTIONS = (
-    Path("data/processed/rainfall")
-    / "regional_gpm_risk_predictions_01nov2026.csv"
+from backend.gpm_refresh.refresh_config import (
+    PROJECT_ROOT,
+    get_run_directory,
 )
 
-NEW_RAINFALL = (
-    get_run_directory(RUN_ID)
-    / "extracted"
-    / "gpm_regional_rainfall_24h.csv"
+
+BASE_INPUT = (
+    PROJECT_ROOT
+    / "data/processed/rainfall/refresh_runs/20261102_152742/"
+      "predictions/regional_gpm_risk_predictions_02nov2026_with_3h.csv"
 )
 
-OUTPUT_DIR = get_run_directory(RUN_ID) / "predictions"
 
-OUTPUT_CSV = (
-    OUTPUT_DIR
-    / "regional_gpm_risk_predictions_02nov2026.csv"
-)
+def read_csv(path, name):
+    path = Path(path)
 
-EXPECTED_RECORDS = 2009
+    if not path.exists():
+        raise FileNotFoundError(f"{name} not found: {path}")
 
-# ============================================================
-# MAIN FUNCTION
-# ============================================================
+    df = pd.read_csv(path)
 
-def main():
+    required = {"record_id", "latitude", "longitude"}
 
-    print("\nNASA GPM: RAINFALL-PREDICTION INTEGRATION")
+    missing = required - set(df.columns)
+
+    if missing:
+        raise ValueError(f"{name} missing columns: {sorted(missing)}")
+
+    if df["record_id"].isna().any():
+        raise ValueError(f"{name} contains missing record IDs.")
+
+    if df["record_id"].duplicated().any():
+        raise ValueError(f"{name} contains duplicate record IDs.")
+
+    return df
+
+
+def validate_source(base, source, name):
+    if len(base) != len(source):
+        raise ValueError(
+            f"{name}: record count mismatch. "
+            f"Base={len(base)}, source={len(source)}"
+        )
+
+    if set(base["record_id"]) != set(source["record_id"]):
+        raise ValueError(f"{name}: record IDs do not match.")
+
+    source = (
+        source.set_index("record_id")
+        .loc[base["record_id"]]
+        .reset_index()
+    )
+
+    for column in ["latitude", "longitude"]:
+        left = pd.to_numeric(base[column], errors="coerce").to_numpy()
+        right = pd.to_numeric(source[column], errors="coerce").to_numpy()
+
+        if (
+            not np.isfinite(left).all()
+            or not np.isfinite(right).all()
+            or not np.allclose(left, right, atol=1e-6, rtol=0)
+        ):
+            raise ValueError(
+                f"{name}: {column} values do not match the base."
+            )
+
+    return source
+
+
+def replace_columns(base, source, columns, name):
+    missing = [column for column in columns if column not in source.columns]
+
+    if missing:
+        raise ValueError(f"{name}: missing columns: {missing}")
+
+    for column in columns:
+        base[column] = source[column].to_numpy()
+
+
+def validate_rainfall(df):
+    rainfall_columns = [
+        "gpm_latest_rate_mm_hr",
+        "gpm_1h_accumulation_mm",
+        "gpm_3h_accumulation_mm",
+        "gpm_6h_accumulation_mm",
+        "gpm_12h_accumulation_mm",
+        "gpm_24h_accumulation_mm",
+    ]
+
+    for column in rainfall_columns:
+        values = pd.to_numeric(df[column], errors="coerce")
+
+        if (
+            values.isna().any()
+            or not np.isfinite(values.to_numpy()).all()
+            or (values < 0).any()
+        ):
+            raise ValueError(
+                f"Invalid rainfall values in {column}."
+            )
+
+        df[column] = values
+
+    nested = [
+        "gpm_1h_accumulation_mm",
+        "gpm_3h_accumulation_mm",
+        "gpm_6h_accumulation_mm",
+        "gpm_12h_accumulation_mm",
+        "gpm_24h_accumulation_mm",
+    ]
+
+    for previous, current in zip(nested, nested[1:]):
+        invalid = df[current] + 1e-6 < df[previous]
+
+        if invalid.any():
+            raise ValueError(
+                f"Accumulation consistency failed: "
+                f"{current} is lower than {previous} "
+                f"for {int(invalid.sum())} records."
+            )
+
+
+def validate_window_metadata(df):
+    windows = [
+        ("gpm_3h_series_start_utc", "gpm_3h_series_end_utc", 3),
+        ("gpm_6h_series_start_utc", "gpm_6h_series_end_utc", 6),
+        ("gpm_12h_series_start_utc", "gpm_12h_series_end_utc", 12),
+        ("gpm_24h_series_start_utc", "gpm_24h_series_end_utc", 24),
+    ]
+
+    endpoints = []
+
+    for start_col, end_col, hours in windows:
+        for column in [start_col, end_col]:
+            if column not in df.columns:
+                raise ValueError(f"Missing metadata column: {column}")
+
+        starts = pd.to_datetime(df[start_col], utc=True, errors="coerce")
+        ends = pd.to_datetime(df[end_col], utc=True, errors="coerce")
+
+        if starts.isna().any() or ends.isna().any():
+            raise ValueError(f"Invalid timestamps in {start_col}/{end_col}.")
+
+        if starts.nunique() != 1 or ends.nunique() != 1:
+            raise ValueError(
+                f"Inconsistent timestamps in {start_col}/{end_col}."
+            )
+
+        if ends.iloc[0] - starts.iloc[0] != pd.Timedelta(hours=hours):
+            raise ValueError(f"Invalid {hours}-hour observation duration.")
+
+        endpoints.append(ends.iloc[0])
+
+    if len(set(endpoints)) != 1:
+        raise ValueError(
+            "Rainfall windows do not share the same UTC endpoint."
+        )
+
+
+def main(args):
+    print("\nGPM MULTI-WINDOW PREDICTION INTEGRATION")
     print("=" * 65)
 
-    # --------------------------------------------------------
-    # 1. CHECK INPUT FILES
-    # --------------------------------------------------------
+    base = read_csv(args.base_csv, "Base prediction dataset")
 
-    if not OLD_PREDICTIONS.exists():
-        raise FileNotFoundError(
-            f"Existing predictions not found: {OLD_PREDICTIONS}"
-        )
+    print("Base records:", len(base))
 
-    if not NEW_RAINFALL.exists():
-        raise FileNotFoundError(
-            f"New rainfall dataset not found: {NEW_RAINFALL}"
-        )
-
-    if OUTPUT_CSV.exists():
-        raise FileExistsError(
-            f"Output already exists. Refusing to overwrite: {OUTPUT_CSV}"
-        )
-
-    predictions = pd.read_csv(OLD_PREDICTIONS)
-    rainfall = pd.read_csv(NEW_RAINFALL)
-
-    print("Existing predictions:", len(predictions))
-    print("New rainfall records:", len(rainfall))
-
-    # --------------------------------------------------------
-    # 2. VALIDATE REQUIRED COLUMNS
-    # --------------------------------------------------------
-
-    prediction_required = [
-        "record_id",
-        "latitude",
-        "longitude",
-        "dem_region",
-        "terrain_model_score",
-    ]
-
-    rainfall_required = [
-        "record_id",
-        "latitude",
-        "longitude",
-        "dem_region",
-        "gpm_24h_accumulation_mm",
-        "gpm_24h_valid_30min_intervals",
-        "gpm_24h_series_start_utc",
-        "gpm_24h_series_end_utc",
-    ]
-
-    for col in prediction_required:
-        if col not in predictions.columns:
-            raise ValueError(
-                f"Prediction dataset missing column: {col}"
-            )
-
-    for col in rainfall_required:
-        if col not in rainfall.columns:
-            raise ValueError(
-                f"Rainfall dataset missing column: {col}"
-            )
-
-    # --------------------------------------------------------
-    # 3. VALIDATE RECORD IDENTIFIERS
-    # --------------------------------------------------------
-
-    for df, name in [
-        (predictions, "predictions"),
-        (rainfall, "rainfall"),
-    ]:
-
-        if df["record_id"].isna().any():
-            raise ValueError(f"Missing record IDs in {name}")
-
-        if df["record_id"].duplicated().any():
-            raise ValueError(f"Duplicate record IDs in {name}")
-
-    if len(predictions) != EXPECTED_RECORDS:
-        raise ValueError("Unexpected prediction record count")
-
-    if len(rainfall) != EXPECTED_RECORDS:
-        raise ValueError("Unexpected rainfall record count")
-
-    if set(predictions["record_id"]) != set(rainfall["record_id"]):
+    if "terrain_model_score" not in base.columns:
         raise ValueError(
-            "Prediction and rainfall record IDs do not match"
+            "Base prediction dataset is missing terrain_model_score."
         )
 
-    # --------------------------------------------------------
-    # 4. SORT AND ALIGN RECORDS
-    # --------------------------------------------------------
-
-    predictions = (
-        predictions.sort_values("record_id")
-        .reset_index(drop=True)
+    terrain_scores = pd.to_numeric(
+        base["terrain_model_score"],
+        errors="coerce",
     )
 
-    rainfall = (
-        rainfall.sort_values("record_id")
-        .reset_index(drop=True)
-    )
-
-    for col in ["latitude", "longitude"]:
-
-        if not np.allclose(
-            predictions[col].to_numpy(dtype=float),
-            rainfall[col].to_numpy(dtype=float),
-            equal_nan=True,
-        ):
-            raise ValueError(f"Coordinate mismatch: {col}")
-
-    if not predictions["dem_region"].equals(rainfall["dem_region"]):
-        raise ValueError("Regional assignment mismatch")
-
-    print("\nRecord IDs and coordinates: PASSED")
-
-    # --------------------------------------------------------
-    # 5. VALIDATE RAINFALL VALUES
-    # --------------------------------------------------------
-
-    rainfall_values = pd.to_numeric(
-        rainfall["gpm_24h_accumulation_mm"],
-        errors="coerce"
-    )
-
-    intervals = pd.to_numeric(
-        rainfall["gpm_24h_valid_30min_intervals"],
-        errors="coerce"
-    )
-
-    if rainfall_values.isna().any():
-        raise ValueError("Invalid 24-hour rainfall values")
-
-    if not np.isfinite(rainfall_values).all():
-        raise ValueError("Non-finite rainfall values")
-
-    if (rainfall_values < 0).any():
-        raise ValueError("Negative rainfall values detected")
-
-    if not (intervals == 48).all():
-        raise ValueError("Incomplete 24-hour rainfall coverage")
-
-    # --------------------------------------------------------
-    # 6. VALIDATE OBSERVATION WINDOW
-    # --------------------------------------------------------
-
-    starts = rainfall[
-        "gpm_24h_series_start_utc"
-    ].dropna().unique()
-
-    ends = rainfall[
-        "gpm_24h_series_end_utc"
-    ].dropna().unique()
-
-    if len(starts) != 1 or len(ends) != 1:
-        raise ValueError("Inconsistent observation timestamps")
-
-    start = pd.to_datetime(starts[0], utc=True)
-    end = pd.to_datetime(ends[0], utc=True)
-
-    if start != pd.Timestamp("2026-11-01T03:00:00Z"):
-        raise ValueError(f"Unexpected start time: {start}")
-
-    if end != pd.Timestamp("2026-11-02T03:00:00Z"):
-        raise ValueError(f"Unexpected end time: {end}")
-
-    if end - start != pd.Timedelta(hours=24):
-        raise ValueError("Observation window is not 24 hours")
-
-    print("Rainfall values and time coverage: PASSED")
-
-    # --------------------------------------------------------
-    # 7. PRESERVE EXISTING PREDICTION DATA
-    # --------------------------------------------------------
-
-    combined = predictions.copy()
-
-    original_scores = predictions[
-        "terrain_model_score"
-    ].copy()
-
-    # Rename previous GPM columns to preserve old observations.
-    old_gpm_columns = [
-        col for col in combined.columns
-        if col.startswith("gpm_")
-    ]
-
-    for col in old_gpm_columns:
-        combined.rename(
-            columns={col: f"previous_{col}"},
-            inplace=True
-        )
-
-    # --------------------------------------------------------
-    # 8. ADD ONLY NEW GPM FEATURES
-    # --------------------------------------------------------
-
-    new_gpm_columns = [
-        col for col in rainfall.columns
-        if col.startswith("gpm_")
-    ]
-
-    if not new_gpm_columns:
-        raise ValueError("No GPM features found in new dataset")
-
-    conflicts = [
-        col for col in new_gpm_columns
-        if col in combined.columns
-    ]
-
-    if conflicts:
-        raise ValueError(
-            f"GPM column conflicts detected: {conflicts}"
-        )
-
-    combined = pd.concat(
-        [
-            combined.reset_index(drop=True),
-            rainfall[new_gpm_columns].reset_index(drop=True),
-        ],
-        axis=1
-    )
-
-    print("New GPM columns integrated:", len(new_gpm_columns))
-
-    # --------------------------------------------------------
-    # 9. FINAL VALIDATION
-    # --------------------------------------------------------
-
-    if len(combined) != EXPECTED_RECORDS:
-        raise ValueError("Final record count mismatch")
-
-    if combined["record_id"].nunique() != EXPECTED_RECORDS:
-        raise ValueError("Final record IDs are not unique")
-
-    if not combined["terrain_model_score"].equals(original_scores):
-        raise ValueError("Original terrain model scores changed")
-
-    if not np.allclose(
-        combined["gpm_24h_accumulation_mm"].to_numpy(dtype=float),
-        rainfall_values.to_numpy(dtype=float),
+    if (
+        terrain_scores.isna().any()
+        or not np.isfinite(terrain_scores.to_numpy()).all()
     ):
-        raise ValueError("Integrated rainfall values do not match source")
+        raise ValueError("Invalid terrain model scores.")
 
-    # --------------------------------------------------------
-    # 10. SAVE NEW DATASET
-    # --------------------------------------------------------
+    sources = [
+        (
+            "3-hour extraction",
+            args.input_3h,
+            [
+                "gpm_latest_rate_mm_hr",
+                "gpm_1h_accumulation_mm",
+                "gpm_3h_accumulation_mm",
+                "gpm_3h_valid_30min_intervals",
+                "gpm_3h_latest_quality_index",
+                "gpm_3h_latest_random_error_mm_hr",
+                "gpm_3h_grid_match_distance_km",
+                "gpm_3h_series_start_utc",
+                "gpm_3h_series_end_utc",
+            ],
+        ),
+        (
+            "6-hour extraction",
+            args.input_6h,
+            [
+                "gpm_6h_accumulation_mm",
+                "gpm_6h_valid_30min_intervals",
+                "gpm_6h_latest_quality_index",
+                "gpm_6h_latest_random_error_mm_hr",
+                "gpm_6h_grid_match_distance_km",
+                "gpm_6h_series_start_utc",
+                "gpm_6h_series_end_utc",
+            ],
+        ),
+        (
+            "12-hour extraction",
+            args.input_12h,
+            [
+                "gpm_12h_accumulation_mm",
+                "gpm_12h_valid_30min_intervals",
+                "gpm_12h_series_start_utc",
+                "gpm_12h_series_end_utc",
+            ],
+        ),
+        (
+            "24-hour combination",
+            args.input_24h,
+            [
+                "gpm_24h_accumulation_mm",
+                "gpm_24h_valid_30min_intervals",
+                "gpm_24h_series_start_utc",
+                "gpm_24h_series_end_utc",
+            ],
+        ),
+    ]
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    for name, path, columns in sources:
+        source = read_csv(path, name)
+        source = validate_source(base, source, name)
+        replace_columns(base, source, columns, name)
 
-    combined.to_csv(OUTPUT_CSV, index=False)
+        print(f"{name}: validated and integrated.")
 
-    # --------------------------------------------------------
-    # 11. SUMMARY
-    # --------------------------------------------------------
+    validate_rainfall(base)
+    validate_window_metadata(base)
+
+    output = args.output_csv
+
+    if output.exists():
+        raise FileExistsError(
+            f"Refusing to overwrite existing output: {output}"
+        )
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    base.to_csv(output, index=False)
 
     print("\n========== INTEGRATION SUMMARY ==========")
-
-    print("Total records:", len(combined))
-    print("Total columns:", len(combined.columns))
-    print("Unique record IDs:", combined["record_id"].nunique())
-
-    print("Terrain model scores preserved: YES")
-    print("Previous GPM observations preserved: YES")
-    print("New 24-hour GPM rainfall integrated: YES")
-
-    print("\nRegional 24-hour rainfall statistics:")
-
+    print("Records:", len(base))
+    print("Rainfall windows: 1h, 3h, 6h, 12h, 24h")
+    print("Terrain scores preserved:", True)
+    print("Terrain score column: terrain_model_score")
     print(
-        combined.groupby("dem_region")[
-            "gpm_24h_accumulation_mm"
-        ].agg(["count", "mean", "max"]).round(3)
+        "Common UTC endpoint:",
+        base["gpm_3h_series_end_utc"].iloc[0],
     )
-
-    print("\nOutput saved:")
-    print(OUTPUT_CSV)
-
-    print("\nRAINFALL INTEGRATION COMPLETED SUCCESSFULLY.")
+    print("Output:", output)
+    print("\nINTEGRATION COMPLETED.")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--run-id", required=True)
+
+    parser.add_argument(
+        "--base-csv",
+        type=Path,
+        default=BASE_INPUT,
+    )
+
+    parser.add_argument("--input-3h", type=Path, required=True)
+    parser.add_argument("--input-6h", type=Path, required=True)
+    parser.add_argument("--input-12h", type=Path, required=True)
+    parser.add_argument("--input-24h", type=Path, required=True)
+
+    parser.add_argument("--output-csv", type=Path)
+
+    args = parser.parse_args()
+
+    run_dir = get_run_directory(args.run_id)
+
+    if args.output_csv is None:
+        args.output_csv = (
+            run_dir
+            / "predictions"
+            / "regional_gpm_risk_predictions_integrated.csv"
+        )
+
+    main(args)
