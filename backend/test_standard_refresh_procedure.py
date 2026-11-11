@@ -442,8 +442,8 @@ class TestStandardRefreshProcedure(unittest.TestCase):
                     )
 
         self.assertEqual(report["status"], "SUCCESS")
-        self.assertEqual(report["updated_locations_summary"]["total_updated_locations"], 12052 + 14550 + 1582)
-        self.assertEqual(report["assessment_coverage"]["total_assessed_locations"], 28184)
+        self.assertEqual(report["updated_locations_summary"]["total_updated_locations"], 12052 + 14550 + 4819)
+        self.assertEqual(report["assessment_coverage"]["total_assessed_locations"], 12052 + 14550 + 4819)
         self.assertEqual(report["assessment_coverage"]["total_unassessed_locations"], 0)
         self.assertEqual(report["rainfall_window_status"]["status"], "VERIFIED_MONOTONIC")
 
@@ -472,7 +472,7 @@ class TestStandardRefreshProcedure(unittest.TestCase):
         for needle in (
             report["run_id"],
             self.obs_end_str,
-            "28,184",
+            "31,421",
             "VERIFIED_MONOTONIC",
             "Himalayas",
             "Northeast India",

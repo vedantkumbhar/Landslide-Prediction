@@ -1,37 +1,42 @@
 {
-  "status": "PASSED",
-  "stage": "Stage 6E \u2014 Western Ghats Limited Pilot Dynamic GIS Risk Map",
-  "generation_timestamp_utc": "2026-11-11T17:23:12Z",
-  "coverage_scope": "LIMITED_PILOT",
-  "complete_region_coverage": false,
-  "location_count": 1582,
+  "stage": "Western Ghats Limited Pilot \u2014 Stage 6.5 Polygon GIS Map Validation",
+  "status": "SUCCESS",
+  "region": "Western Ghats",
+  "coverage_disclosure": "Limited Western Ghats Pilot across 14 validated DEM tiles only (4,819 5 km grid cells, 182 historical landslide events, 1,400 background samples); does not imply complete Western Ghats coverage. EXPERIMENTAL_PROVISIONAL_WESTERN_GHATS_LIMITED_PILOT_14_TILES_ONLY_NOT_OFFICIAL_WARNING.",
+  "is_operational_success": true,
   "dem_tiles_count": 14,
-  "outputs": {
-    "html_map_path": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_map.html",
-    "html_map_size_bytes": 490794,
-    "point_geojson_path": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_hazard_risk.geojson",
-    "map_metadata_path": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_map_metadata.json"
-  },
-  "primary_screening_categories": {
-    "Low": 791,
-    "Moderate": 474,
-    "High": 237,
-    "Very High": 80,
-    "UNASSESSED": 0
-  },
-  "relative_category_cutoffs": {
-    "P50": 8.428217153217151,
-    "P80": 18.769975302475295,
-    "P95": 45.11823103448329
+  "grid_locations_count": 4819,
+  "historical_events_count": 182,
+  "background_samples_count": 1400,
+  "total_features_in_point_geojson": 6401,
+  "regional_polygons_count": 1478,
+  "spatial_cells_count": 4819,
+  "html_size_mb": 4.43,
+  "regions_geojson_size_mb": 3.41,
+  "cells_geojson_size_mb": 6.58,
+  "freshness_audit": {
+    "observation_start_utc": "2026-11-10T14:00:00Z",
+    "observation_end_utc": "2026-11-11T14:00:00Z",
+    "calculated_latency_hours": 5.3159,
+    "freshness_status": "FRESH",
+    "is_stale": false,
+    "is_fresh": true,
+    "reason": "Fresh complete observation (5.32h <= 12.0h)",
+    "map_generation_timestamp_utc": "2026-11-11T19:18:57.075673Z"
   },
   "validation_checks": {
-    "location_count_1582": true,
-    "all_14_tiles_present": true,
-    "events_182_retained": true,
-    "background_1400_retained": true,
-    "runtime_60s_freshness_guard_injected": true,
-    "compact_html_below_3mb": true,
-    "threshold_validation_passed": true
+    "all_grid_locations_represented": true,
+    "all_grid_cells_in_regional_polygons": true,
+    "no_duplicate_or_missing_grid_ids": true,
+    "all_polygon_geometries_valid": true,
+    "esri_satellite_default_basemap": true,
+    "historical_events_separated": true,
+    "background_samples_separated": true,
+    "limited_pilot_disclosure_present": true,
+    "thresholds_verified_against_stage64": true,
+    "shared_popup_template_used": true,
+    "rfc7946_geojson_valid": true
   },
-  "disclaimer": "EXPERIMENTAL PROVISIONAL SCREENING ONLY \u00b7 NOT AN OFFICIAL WARNING OR CALIBRATED PROBABILITY"
+  "generation_timestamp_utc": "2026-11-11T19:18:57.075673Z",
+  "disclaimer": "Limited Western Ghats Pilot across 14 validated DEM tiles only (4,819 5 km grid cells, 182 historical landslide events, 1,400 background samples); does not imply complete Western Ghats coverage. EXPERIMENTAL_PROVISIONAL_WESTERN_GHATS_LIMITED_PILOT_14_TILES_ONLY_NOT_OFFICIAL_WARNING."
 }

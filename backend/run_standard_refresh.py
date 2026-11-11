@@ -90,34 +90,35 @@ from backend.create_northeast_risk_map import (
     DEFAULT_VALIDATION_REPORT as NE_STAGE_MAP_REPORT_JSON,
     create_northeast_dynamic_risk_map,
 )
-from backend.refresh_western_ghats_rainfall import (
-    DEFAULT_BACKGROUND_CSV as WG_BACKGROUND_CSV,
-    DEFAULT_EVENTS_CSV as WG_EVENTS_CSV,
-    LATEST_STATUS_JSON as WG_RAIN_STATUS_JSON,
-    LATEST_VALIDATED_CSV as WG_RAIN_LATEST_CSV,
-    WesternGhatsDynamicRefreshEngine,
+from backend.generate_western_ghats_spatial_grid import (
+    DEFAULT_OUTPUT_CSV as WG_GRID_CSV,
 )
-from backend.integrate_western_ghats_rainfall_terrain import (
-    METADATA_JSON_PATH as WG_INT_META_JSON,
-    MODEL_BALANCED_PATH as WG_MODEL_BALANCED,
-    MODEL_UNWEIGHTED_PATH as WG_MODEL_UNWEIGHTED,
-    OUTPUT_CSV_PATH as WG_INT_CSV,
-    REPORT_JSON_PATH as WG_INT_REPORT_JSON,
-    run_integration_pipeline as run_wg_integration_pipeline,
+from backend.predict_western_ghats_terrain_susceptibility import (
+    DEFAULT_BALANCED_MODEL as WG_MODEL_BALANCED,
+    DEFAULT_OUTPUT_CSV as WG_TERRAIN_CSV,
+    DEFAULT_UNWEIGHTED_MODEL as WG_MODEL_UNWEIGHTED,
 )
-from backend.predict_western_ghats_dynamic_risk import (
+from backend.integrate_western_ghats_gpm_rainfall import (
+    DEFAULT_INTEGRATED_CSV as WG_RAIN_LATEST_CSV,
+    DEFAULT_VALIDATION_REPORT as WG_RAIN_STATUS_JSON,
+    integrate_western_ghats_gpm_rainfall,
+)
+from backend.predict_western_ghats_grid_dynamic_risk import (
     DEFAULT_METADATA_JSON as WG_RISK_META_JSON,
     DEFAULT_OUTPUT_CSV as WG_RISK_CSV,
-    DEFAULT_VALIDATION_REPORT_JSON as WG_RISK_REPORT_JSON,
-    run_western_ghats_dynamic_risk_pipeline,
+    DEFAULT_VALIDATION_REPORT as WG_RISK_REPORT_JSON,
+    predict_western_ghats_grid_dynamic_risk,
 )
-from backend.create_western_ghats_risk_map import (
-    DEFAULT_OUTPUT_GEOJSON as WG_SYNC_POINTS_GEOJSON,
+from backend.create_western_ghats_polygon_risk_map import (
+    DEFAULT_BACKGROUND_CSV as WG_BACKGROUND_CSV,
+    DEFAULT_EVENTS_CSV as WG_EVENTS_CSV,
+    DEFAULT_OUTPUT_CELLS_GEOJSON as WG_CELLS_GEOJSON,
+    DEFAULT_OUTPUT_GEOJSON as WG_POINTS_GEOJSON,
     DEFAULT_OUTPUT_HTML as WG_HTML_MAP,
-    DEFAULT_OUTPUT_META as WG_MAP_META_JSON,
-    DEFAULT_POINT_GEOJSON as WG_STAGE_POINTS_GEOJSON,
+    DEFAULT_OUTPUT_METADATA as WG_MAP_META_JSON,
+    DEFAULT_OUTPUT_REGIONS_GEOJSON as WG_REGIONS_GEOJSON,
     DEFAULT_VALIDATION_REPORT as WG_MAP_REPORT_JSON,
-    create_western_ghats_dynamic_risk_map,
+    generate_western_ghats_polygon_risk_map,
 )
 
 
@@ -258,12 +259,14 @@ def _build_region_specs() -> Dict[str, Dict[str, Any]]:
         },
         "western_ghats": {
             "display_name": "Western Ghats (Limited Pilot)",
-            "coverage_note": "Limited Western Ghats pilot only: 14 validated DEM tiles, 1,582 locations (182 historical events + 1,400 background samples); does not imply complete Western Ghats coverage.",
-            "stages": "Stages 6B -> 6C -> 6D -> 6E",
-            "expected_locations": 1582,
+            "coverage_note": "Limited Western Ghats pilot only: 14 validated DEM tiles, 4,819 5 km grid cells, 182 historical landslide events, and 1,400 background samples; does not imply complete Western Ghats coverage.",
+            "stages": "Stages 6.3 -> 6.4 -> 6.5 (5 km Grid & Polygons)",
+            "expected_locations": 4819,
             "expected_tiles": 14,
-            "geometry_mode": "validated_sample_points_compact_canvas",
+            "geometry_mode": "regional_polygons_and_5km_cells",
             "required_inputs": [
+                (WG_GRID_CSV, ["grid_id", "tile", "latitude", "longitude", "utm_x", "utm_y", "utm_epsg", *TERRAIN_MODEL_PREDICTORS]),
+                (WG_TERRAIN_CSV, ["grid_id", "tile", "latitude", "longitude", "terrain_rf_prob_balanced"]),
                 (WG_EVENTS_CSV, ["event_id", "latitude", "longitude", "dem_tile", *TERRAIN_MODEL_PREDICTORS]),
                 (WG_BACKGROUND_CSV, ["sample_id", "latitude", "longitude", "tile", *TERRAIN_MODEL_PREDICTORS]),
             ],
@@ -271,15 +274,13 @@ def _build_region_specs() -> Dict[str, Dict[str, Any]]:
             "tracked_outputs": [
                 WG_RAIN_LATEST_CSV,
                 WG_RAIN_STATUS_JSON,
-                WG_INT_CSV,
-                WG_INT_META_JSON,
-                WG_INT_REPORT_JSON,
                 WG_RISK_CSV,
                 WG_RISK_META_JSON,
                 WG_RISK_REPORT_JSON,
-                WG_STAGE_POINTS_GEOJSON,
                 WG_HTML_MAP,
-                WG_SYNC_POINTS_GEOJSON,
+                WG_POINTS_GEOJSON,
+                WG_REGIONS_GEOJSON,
+                WG_CELLS_GEOJSON,
                 WG_MAP_META_JSON,
                 WG_MAP_REPORT_JSON,
             ],
@@ -291,18 +292,25 @@ def _build_region_specs() -> Dict[str, Dict[str, Any]]:
             "map_metadata_json": WG_MAP_META_JSON,
             "map_report_json": WG_MAP_REPORT_JSON,
             "expected_geojson_counts": {
-                WG_STAGE_POINTS_GEOJSON: 1582,
-                WG_SYNC_POINTS_GEOJSON: 1582,
+                WG_POINTS_GEOJSON: 6401,
+                WG_CELLS_GEOJSON: 4819,
             },
-            "regions_geojson": None,
-            "html_max_bytes": 3_000_000,
+            "regions_geojson": WG_REGIONS_GEOJSON,
+            "html_max_bytes": 15_000_000,
             "synced_outputs": [
                 WG_HTML_MAP,
-                WG_SYNC_POINTS_GEOJSON,
+                WG_POINTS_GEOJSON,
+                WG_REGIONS_GEOJSON,
+                WG_CELLS_GEOJSON,
                 WG_MAP_META_JSON,
                 WG_MAP_REPORT_JSON,
             ],
             "test_modules": [
+                "backend.test_western_ghats_spatial_grid",
+                "backend.test_western_ghats_terrain_susceptibility",
+                "backend.test_western_ghats_gpm_grid_rainfall",
+                "backend.test_western_ghats_grid_dynamic_risk",
+                "backend.test_western_ghats_polygon_risk_map",
                 "backend.test_western_ghats_gpm_refresh",
                 "backend.test_western_ghats_rainfall_terrain_integration",
                 "backend.test_western_ghats_dynamic_risk",
@@ -690,47 +698,40 @@ def _execute_western_ghats_pipeline(
     now_utc: datetime,
     max_latency_hours: float,
 ) -> Dict[str, Any]:
-    engine = WesternGhatsDynamicRefreshEngine(
-        max_latency_hours=max_latency_hours,
-        workers=workers,
-        offline_mode=offline,
-    )
-    refresh_meta = engine.execute_refresh(target_end_time=resolved_end_dt)
-    if (
-        refresh_meta.get("status") != "SUCCESS"
-        or refresh_meta.get("promotion_status") != "PROMOTED"
-        or not refresh_meta.get("is_24h_complete")
-    ):
-        raise RuntimeError(
-            f"Western Ghats Stage 6B refresh failed gate: "
-            f"status={refresh_meta.get('status')}, promotion={refresh_meta.get('promotion_status')}, "
-            f"complete={refresh_meta.get('is_24h_complete')}"
-        )
-
-    _, int_meta = run_wg_integration_pipeline(
-        max_latency_hours=max_latency_hours,
-        force_overwrite=True,
-    )
-
-    risk_res = run_western_ghats_dynamic_risk_pipeline(
-        max_latency_hours=max_latency_hours,
+    _ = workers
+    rain_report = integrate_western_ghats_gpm_rainfall(
+        target_end_time=resolved_end_dt,
+        allow_download=not offline,
+        overwrite=True,
         now_utc=now_utc,
     )
-    if risk_res.get("status") != "SUCCESS":
-        raise RuntimeError(f"Western Ghats Stage 6D risk prediction failed: {risk_res.get('status')}")
+    if rain_report.get("refresh_status") != "SUCCESS" or not rain_report.get("is_operational_success"):
+        raise RuntimeError(
+            f"Western Ghats Stage 6.3 GPM rainfall failed gate: "
+            f"status={rain_report.get('refresh_status')}, operational={rain_report.get('is_operational_success')}"
+        )
 
-    map_res = create_western_ghats_dynamic_risk_map(
+    _, risk_meta, risk_report = predict_western_ghats_grid_dynamic_risk(
+        max_latency_hours=max_latency_hours,
         now_utc=now_utc,
         overwrite=True,
     )
-    if map_res.get("status") != "SUCCESS":
-        raise RuntimeError(f"Western Ghats Stage 6E map generation failed: {map_res.get('status')}")
+    if risk_report.get("status") != "SUCCESS":
+        raise RuntimeError(f"Western Ghats Stage 6.4 dynamic risk prediction failed: {risk_report.get('status')}")
+
+    map_report = generate_western_ghats_polygon_risk_map(
+        max_latency_hours=max_latency_hours,
+        now_utc=now_utc,
+        overwrite=True,
+    )
+    if map_report.get("status") != "SUCCESS":
+        raise RuntimeError(f"Western Ghats Stage 6.5 polygon map generation failed: {map_report.get('status')}")
 
     return {
-        "rainfall_report": refresh_meta,
-        "integration_metadata": int_meta,
-        "risk_result": risk_res,
-        "map_result": map_res,
+        "rainfall_report": rain_report,
+        "risk_metadata": risk_meta,
+        "risk_report": risk_report,
+        "map_report": map_report,
     }
 
 
