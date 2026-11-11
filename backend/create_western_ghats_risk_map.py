@@ -1,24 +1,24 @@
 """
 Stage 6E Deliverable: Western Ghats Dynamic Landslide Hazard GIS Risk Map Generator.
 
-Generates a standalone, production-ready interactive GIS HTML map for all 1,582 locations
-across 14 DEM tiles in the Western Ghats (182 historical landslide events + 1,400 provisional
-background samples) using approved Stage 6D dynamic landslide hazard risk predictions and NASA
-GPM IMERG Early Run V07C rainfall accumulations.
+Generates a standalone, compact, production-ready interactive GIS HTML map for all 1,582
+validated locations across 14 DEM tiles in the Western Ghats (182 historical landslide events
++ 1,400 provisional background samples; no fabricated 5 km grid and no Western Maharashtra
+pilot substitution) using approved Stage 6D dynamic landslide hazard risk predictions and
+NASA GPM IMERG Early Run V07C rainfall accumulations.
 
 Map architecture:
 - Basemap: Esri World Topographic Map (default) + CartoDB Positron (optional toggle).
-- 5 independently toggleable feature layers:
+- 5 independently toggleable Canvas feature layers populated client-side (< 3 MB HTML):
     1. Dynamic Hazard Screening (Primary Stage 6D Category) [Active by default]
     2. GPM 24h Rainfall Accumulation (mm) [Continuous blues, default off]
     3. Unweighted Random Forest Terrain Susceptibility (Comparison Only) [Continuous green-red, default off]
     4. Historical Landslide Events (n=182) [Active by default, distinctive border]
     5. Provisional Background Samples (n=1,400) [Default off]
-- Informative popups with full terrain (both balanced and unweighted explicitly labeled), rainfall,
-  risk, latency, and disclaimer attributes.
-- Floating dashboard overlay showing category quantile legend, observation window, latency, and legal disclaimers.
-- Strict input validation, data freshness/completeness gating with explicit UTC enforcement, strict metadata
-  threshold validation with zero fallbacks, missing-value protection, HTML escaping, and overwrite protection.
+- Shared client-side popups explicitly labeling balanced (used in risk) vs unweighted (comparison only) models.
+- Dynamic 60-second client-side browser freshness guard (12.0h limit -> STALE / UNASSESSED).
+- Strict metadata-driven quantile threshold validation with zero silent fallbacks.
+- Timestamped backups, atomic output writes, and synchronized GeoJSON/metadata in `outputs/`.
 """
 
 import argparse
@@ -26,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 import html
 import json
 import math
+import os
 from pathlib import Path
 import sys
 from typing import Any, Dict, Optional, Tuple
@@ -40,6 +41,20 @@ import pandas as pd
 # =====================================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from backend.export_western_ghats_dynamic_risk_geojson import (
+    DEFAULT_OUTPUT_GEOJSON as DEFAULT_POINT_GEOJSON,
+    export_western_ghats_dynamic_risk_geojson,
+)
+from backend.gis_refresh_utils import (
+    atomic_copy_file,
+    atomic_write_json,
+    build_compute_freshness_js,
+    create_timestamped_backup,
+    validate_dynamic_metadata_thresholds,
+)
 
 DEFAULT_INPUT_CSV = (
     PROJECT_ROOT
@@ -63,6 +78,24 @@ DEFAULT_OUTPUT_HTML = (
     / "western_ghats_dynamic_risk_map.html"
 )
 
+DEFAULT_OUTPUT_GEOJSON = (
+    PROJECT_ROOT
+    / "outputs"
+    / "western_ghats_dynamic_hazard_risk.geojson"
+)
+
+DEFAULT_OUTPUT_META = (
+    PROJECT_ROOT
+    / "outputs"
+    / "western_ghats_dynamic_risk_map_metadata.json"
+)
+
+DEFAULT_VALIDATION_REPORT = (
+    PROJECT_ROOT
+    / "outputs"
+    / "western_ghats_dynamic_risk_map_validation_report.json"
+)
+
 # Approved regional scope contracts
 EXPECTED_LOCATIONS_COUNT = 1582
 EXPECTED_TILES_COUNT = 14
@@ -75,12 +108,6 @@ LON_BOUNDS = (70.0, 80.0)
 
 # Freshness limit contract (12.0 hours)
 MAX_DATA_LATENCY_HOURS = 12.0
-
-# Exact approved Stage 6D relative quantile cutoffs
-APPROVED_P50 = 9.364049598402843
-APPROVED_P80 = 19.79328141262924
-APPROVED_P95 = 45.95278574197298
-THRESHOLD_TOLERANCE = 1e-6
 
 # Approved color scheme for primary screening categories
 CATEGORY_COLORS: Dict[str, str] = {
@@ -115,50 +142,13 @@ DISCLAIMER_TEXT = (
 
 def validate_stage6d_metadata_thresholds(metadata: Dict[str, Any]) -> Dict[str, float]:
     """
-    Strictly validate Stage 6D relative category cutoffs in metadata.
-    Removes all silent fallbacks:
-    - Requires 'risk_formula_specification' dict.
-    - Requires 'relative_category_cutoffs' dict.
-    - Requires all three keys: 'P50_low_to_moderate', 'P80_moderate_to_high', 'P95_high_to_very_high'.
-    - Rejects missing, null, non-numeric, or non-finite values.
-    - Verifies values against approved Stage 6D thresholds within strict floating-point tolerance (1e-6).
-    - Raises ValueError on any validation failure.
-    - Never silently substitutes hard-coded defaults.
+    Strictly validate Stage 6D relative category cutoffs dynamically from metadata.
+    Removes all silent fallbacks and hardcoded stale equality checks:
+    - Requires 'risk_formula_specification' and 'relative_category_cutoffs' dicts.
+    - Requires finite numeric (non-bool, non-null) P50, P80, P95 cutoffs.
+    - Enforces strict ordering: 0 < P50 < P80 < P95 < 100.
     """
-    if not isinstance(metadata, dict):
-        raise ValueError("Metadata must be a dictionary.")
-
-    risk_spec = metadata.get("risk_formula_specification")
-    if not isinstance(risk_spec, dict):
-        raise ValueError("Metadata missing 'risk_formula_specification' dictionary.")
-
-    cutoffs = risk_spec.get("relative_category_cutoffs")
-    if not isinstance(cutoffs, dict):
-        raise ValueError("Metadata missing 'relative_category_cutoffs' dictionary.")
-
-    required_keys = [
-        ("P50_low_to_moderate", APPROVED_P50),
-        ("P80_moderate_to_high", APPROVED_P80),
-        ("P95_high_to_very_high", APPROVED_P95),
-    ]
-
-    validated_cutoffs: Dict[str, float] = {}
-    for key, approved_val in required_keys:
-        if key not in cutoffs:
-            raise ValueError(f"Missing required threshold key in metadata: '{key}'")
-        raw_val = cutoffs[key]
-        if raw_val is None or isinstance(raw_val, bool) or not isinstance(raw_val, (int, float, np.floating)):
-            raise ValueError(f"Invalid or non-numeric threshold value for '{key}': {raw_val!r}")
-        val = float(raw_val)
-        if not math.isfinite(val):
-            raise ValueError(f"Non-finite threshold value for '{key}': {val}")
-        if not math.isclose(val, approved_val, rel_tol=THRESHOLD_TOLERANCE, abs_tol=THRESHOLD_TOLERANCE):
-            raise ValueError(
-                f"Threshold mismatch for '{key}': got {val}, expected {approved_val} (within tolerance {THRESHOLD_TOLERANCE})"
-            )
-        validated_cutoffs[key] = val
-
-    return validated_cutoffs
+    return validate_dynamic_metadata_thresholds(metadata)
 
 
 # =====================================================================
@@ -376,6 +366,9 @@ def build_marker_popup_html(
             <div style="font-size:11px; color:#7f8c8d; margin-top:3px;">
                 DEM Tile: <b>{tile}</b> &nbsp;|&nbsp; Subregion: <b>{subregion}</b>
             </div>
+            <div style="font-size:10.5px; color:#5d6d7e; margin-top:2px;">
+                Coverage: <b>Limited Western Ghats Pilot</b> (14 DEM tiles, 1,582 locations)
+            </div>
         </div>
 
         <table style="width:100%; border-collapse:collapse; margin-bottom:8px; font-size:11px;">
@@ -451,7 +444,7 @@ def build_marker_popup_html(
         </div>
 
         <div style="font-size:9.5px; color:#7f8c8d; line-height:1.3; background:#fff8e1; border:1px solid #ffe082; padding:5px 7px; border-radius:4px;">
-            <b>Notice:</b> Experimental relative screening index only. Not an official government warning, safety directive, or calibrated slope failure probability.
+            <b>Notice:</b> Limited Western Ghats pilot screening only (14 validated DEM tiles, 1,582 locations: 182 historical events &amp; 1,400 background samples); does not imply complete Western Ghats coverage. Not an official government warning, safety directive, or calibrated slope failure probability.
         </div>
     </div>
     """
@@ -623,8 +616,20 @@ def create_western_ghats_dynamic_risk_map(
     )
     rainfall_colormap.add_to(map_obj)
 
-    # 5. Construct Feature Layers
-    print("\n3. Building 5 independently toggleable layers...")
+    # 5. Construct Feature Layers & Compact Client-Side Rendering
+    print("\n3. Building 5 independently toggleable Canvas layers...")
+
+    is_default_prod = output_html_path.resolve() == DEFAULT_OUTPUT_HTML.resolve()
+    out_dir = output_html_path.parent
+    sync_geojson_path = DEFAULT_OUTPUT_GEOJSON if is_default_prod else out_dir / "western_ghats_dynamic_hazard_risk.geojson"
+    meta_out_path = DEFAULT_OUTPUT_META if is_default_prod else out_dir / "western_ghats_dynamic_risk_map_metadata.json"
+    val_report_path = DEFAULT_VALIDATION_REPORT if is_default_prod else out_dir / "western_ghats_dynamic_risk_map_validation_report.json"
+
+    backup_targets = [output_html_path, meta_out_path, val_report_path]
+    if is_default_prod:
+        backup_targets.extend([sync_geojson_path, DEFAULT_POINT_GEOJSON])
+    if overwrite:
+        create_timestamped_backup(backup_targets, out_dir / "backup")
 
     layer_dynamic_risk = folium.FeatureGroup(
         name="Dynamic Hazard Screening (Primary Stage 6D Category)",
@@ -647,106 +652,6 @@ def create_western_ghats_dynamic_risk_map(
         show=False,
     )
 
-    # 6. Populate Map Layers
-    for _, row in df.iterrows():
-        lat = float(row["latitude"])
-        lon = float(row["longitude"])
-        cat = str(row.get("primary_screening_category", "UNASSESSED_MISSING_RAINFALL"))
-        sample_type = str(row.get("sample_type", ""))
-        is_event = (sample_type == "historical_landslide")
-        sample_id = safe_html(row.get("sample_id"))
-
-        # Color mapping with safety check for missing/unassessed
-        raw_risk = row.get("dynamic_risk_index")
-        if raw_risk is None or pd.isna(raw_risk) or not np.isfinite(raw_risk) or cat == "UNASSESSED_MISSING_RAINFALL":
-            primary_color = CATEGORY_COLORS["UNASSESSED_MISSING_RAINFALL"]
-            display_cat = "Unassessed"
-        else:
-            primary_color = CATEGORY_COLORS.get(cat, CATEGORY_COLORS["UNASSESSED_MISSING_RAINFALL"])
-            display_cat = safe_html(cat)
-
-        popup_html = build_marker_popup_html(row, obs_start_utc, obs_end_utc, latency_hours)
-        popup = folium.Popup(popup_html, max_width=350)
-        tooltip_text = f"{'EVENT' if is_event else 'BACKGROUND'}: {sample_id} | {display_cat} Risk"
-
-        # Layer 1: Primary Screening Category
-        folium.CircleMarker(
-            location=[lat, lon],
-            radius=5.5 if is_event else 4.0,
-            color="#2c3e50" if is_event else primary_color,
-            weight=1.5 if is_event else 1.0,
-            fill=True,
-            fill_color=primary_color,
-            fill_opacity=0.85,
-            popup=popup,
-            tooltip=tooltip_text,
-        ).add_to(layer_dynamic_risk)
-
-        # Layer 2: GPM 24h Rainfall Accumulation (Safe colormap evaluation)
-        val_24h = row.get("gpm_24h_accumulation_mm")
-        if val_24h is not None and pd.notna(val_24h) and np.isfinite(val_24h) and val_24h >= 0:
-            rain_color = rainfall_colormap(min(float(val_24h), max_rain))
-        else:
-            rain_color = CATEGORY_COLORS["UNASSESSED_MISSING_RAINFALL"]
-
-        folium.CircleMarker(
-            location=[lat, lon],
-            radius=4.5,
-            color=rain_color,
-            weight=1.0,
-            fill=True,
-            fill_color=rain_color,
-            fill_opacity=0.80,
-            popup=folium.Popup(popup_html, max_width=350),
-            tooltip=f"{sample_id}: 24h Rain: {format_rainfall_val(val_24h)}",
-        ).add_to(layer_rainfall)
-
-        # Layer 3: Unweighted Terrain Susceptibility (Safe colormap evaluation)
-        val_prob = row.get("terrain_rf_prob_unweighted")
-        if val_prob is not None and pd.notna(val_prob) and np.isfinite(val_prob) and 0.0 <= val_prob <= 1.0:
-            terrain_color = terrain_colormap(float(val_prob))
-        else:
-            terrain_color = CATEGORY_COLORS["UNASSESSED_MISSING_RAINFALL"]
-
-        folium.CircleMarker(
-            location=[lat, lon],
-            radius=4.5,
-            color=terrain_color,
-            weight=1.0,
-            fill=True,
-            fill_color=terrain_color,
-            fill_opacity=0.80,
-            popup=folium.Popup(popup_html, max_width=350),
-            tooltip=f"{sample_id}: Unweighted Terrain Prob: {format_score_val(val_prob, 3)}",
-        ).add_to(layer_terrain)
-
-        # Layer 4 & 5: Event vs Background Separation
-        if is_event:
-            folium.CircleMarker(
-                location=[lat, lon],
-                radius=6.5,
-                color="#1a252f",
-                weight=2.0,
-                fill=True,
-                fill_color=primary_color,
-                fill_opacity=0.90,
-                popup=folium.Popup(popup_html, max_width=350),
-                tooltip=f"EVENT: {sample_id} ({display_cat})",
-            ).add_to(layer_events)
-        else:
-            folium.CircleMarker(
-                location=[lat, lon],
-                radius=3.5,
-                color=primary_color,
-                weight=0.8,
-                fill=True,
-                fill_color=primary_color,
-                fill_opacity=0.75,
-                popup=folium.Popup(popup_html, max_width=350),
-                tooltip=f"BACKGROUND: {sample_id} ({display_cat})",
-            ).add_to(layer_background)
-
-    # Add all 5 layers to the map
     layer_dynamic_risk.add_to(map_obj)
     layer_rainfall.add_to(map_obj)
     layer_terrain.add_to(map_obj)
@@ -755,13 +660,366 @@ def create_western_ghats_dynamic_risk_map(
 
     folium.LayerControl(collapsed=False).add_to(map_obj)
 
-    # 7. Add Floating Header & Legend Dashboard Overlay
-    cat_counts = df["primary_screening_category"].value_counts()
-    count_low = cat_counts.get("Low", 0)
-    count_mod = cat_counts.get("Moderate", 0)
-    count_high = cat_counts.get("High", 0)
-    count_vhigh = cat_counts.get("Very High", 0)
+    # 6. Serialize 1,582 Sample Records into Compact JSON Store
+    print("   Serializing 1,582 sample records to compact client-side store...")
+    wg_records = []
+    for _, r in df.iterrows():
+        rec_id = str(r.get("record_id", ""))
+        samp_id = str(r.get("sample_id", ""))
+        samp_type = str(r.get("sample_type", ""))
+        tile = str(r.get("tile", ""))
+        subreg = str(r.get("subregion", ""))
+        lat = round(float(r["latitude"]), 4)
+        lon = round(float(r["longitude"]), 4)
+        elev = round(float(r["elevation_m"]), 1) if pd.notna(r.get("elevation_m")) and np.isfinite(r.get("elevation_m")) else None
+        slope = round(float(r["slope_degrees"]), 2) if pd.notna(r.get("slope_degrees")) and np.isfinite(r.get("slope_degrees")) else None
 
+        raw_risk = r.get("dynamic_risk_index")
+        cat = str(r.get("primary_screening_category", "UNASSESSED_MISSING_RAINFALL"))
+        if raw_risk is None or pd.isna(raw_risk) or not np.isfinite(raw_risk) or cat == "UNASSESSED_MISSING_RAINFALL":
+            risk_val = None
+            display_cat = "Unassessed"
+            c_risk = CATEGORY_COLORS["UNASSESSED_MISSING_RAINFALL"]
+        else:
+            risk_val = round(float(raw_risk), 2)
+            display_cat = cat
+            c_risk = CATEGORY_COLORS.get(cat, CATEGORY_COLORS["UNASSESSED_MISSING_RAINFALL"])
+
+        ftier = str(r.get("risk_tier_fixed", "Unavailable"))
+        tbal = round(float(r["terrain_rf_prob_balanced"]), 3) if pd.notna(r.get("terrain_rf_prob_balanced")) and np.isfinite(r.get("terrain_rf_prob_balanced")) else None
+        tbal_tier = str(r.get("terrain_baseline_screening_tier", "Unavailable"))
+        tunw = round(float(r["terrain_rf_prob_unweighted"]), 3) if pd.notna(r.get("terrain_rf_prob_unweighted")) and np.isfinite(r.get("terrain_rf_prob_unweighted")) else None
+
+        r1 = round(float(r["gpm_1h_accumulation_mm"]), 2) if pd.notna(r.get("gpm_1h_accumulation_mm")) and np.isfinite(r.get("gpm_1h_accumulation_mm")) else None
+        r3 = round(float(r["gpm_3h_accumulation_mm"]), 2) if pd.notna(r.get("gpm_3h_accumulation_mm")) and np.isfinite(r.get("gpm_3h_accumulation_mm")) else None
+        r6 = round(float(r["gpm_6h_accumulation_mm"]), 2) if pd.notna(r.get("gpm_6h_accumulation_mm")) and np.isfinite(r.get("gpm_6h_accumulation_mm")) else None
+        r12 = round(float(r["gpm_12h_accumulation_mm"]), 2) if pd.notna(r.get("gpm_12h_accumulation_mm")) and np.isfinite(r.get("gpm_12h_accumulation_mm")) else None
+        r24 = round(float(r["gpm_24h_accumulation_mm"]), 2) if pd.notna(r.get("gpm_24h_accumulation_mm")) and np.isfinite(r.get("gpm_24h_accumulation_mm")) else None
+        rindex = round(float(r["rainfall_intensity_index"]), 3) if pd.notna(r.get("rainfall_intensity_index")) and np.isfinite(r.get("rainfall_intensity_index")) else None
+        rpct = round(float(r["rainfall_percentile_24h"]), 3) if pd.notna(r.get("rainfall_percentile_24h")) and np.isfinite(r.get("rainfall_percentile_24h")) else None
+        status_str = str(r.get("risk_calculation_status", "VALIDATED_SCREENING_CALCULATED"))
+
+        c_rain = rainfall_colormap(min(r24, max_rain)) if r24 is not None and r24 >= 0 else CATEGORY_COLORS["UNASSESSED_MISSING_RAINFALL"]
+        c_terrain = terrain_colormap(tunw) if tunw is not None and 0.0 <= tunw <= 1.0 else CATEGORY_COLORS["UNASSESSED_MISSING_RAINFALL"]
+
+        wg_records.append([
+            rec_id, samp_id, samp_type, tile, subreg, lat, lon, elev, slope,
+            risk_val, display_cat, c_risk, ftier,
+            tbal, tbal_tier, tunw,
+            r1, r3, r6, r12, r24, rindex, rpct, status_str,
+            c_rain, c_terrain,
+        ])
+
+    cat_counts = df["primary_screening_category"].value_counts()
+    count_low = int(cat_counts.get("Low", 0))
+    count_mod = int(cat_counts.get("Moderate", 0))
+    count_high = int(cat_counts.get("High", 0))
+    count_vhigh = int(cat_counts.get("Very High", 0))
+    count_unassessed = int(cat_counts.get("UNASSESSED_MISSING_RAINFALL", 0))
+
+    shared_freshness_js = build_compute_freshness_js(MAX_DATA_LATENCY_HOURS)
+    json_wg_records = json.dumps(wg_records, separators=(",", ":"))
+    gen_ts_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    client_script_template = """
+<script>
+(function() {
+    var wgRecords = __JSON_WG_RECORDS__;
+    var obsEndUtc = __OBS_END_UTC_JSON__;
+    var totalLocations = __TOTAL_LOCATIONS__;
+    var freshCategoryCounts = {
+        Low: __COUNT_LOW__,
+        Moderate: __COUNT_MOD__,
+        High: __COUNT_HIGH__,
+        VeryHigh: __COUNT_VHIGH__,
+        Unassessed: __COUNT_UNASSESSED__
+    };
+
+    var isStale = false;
+    var currentLatencyHours = __LATENCY_HOURS__;
+    var currentStatusStr = "FRESH";
+    var riskMarkers = [];
+    var rainMarkers = [];
+
+__SHARED_FRESHNESS_JS__
+
+    function escapeHtml(str) {
+        if (str === null || str === undefined) return "Unavailable";
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function formatVal(v, suffix, decimals) {
+        if (v === null || v === undefined || isNaN(v)) return '<span style="color:#e74c3c; font-style:italic;">Unavailable</span>';
+        var formatted = (decimals !== undefined) ? Number(v).toFixed(decimals) : String(v);
+        return suffix ? formatted + " " + suffix : formatted;
+    }
+
+    function formatInt(v) {
+        return Number(v || 0).toLocaleString("en-US");
+    }
+
+    function renderPopupHtml(d) {
+        var recId = escapeHtml(d[0]);
+        var sampType = String(d[2] || "");
+        var isEvent = (sampType === "historical_landslide");
+        var badgeBg = isEvent ? "#c0392b" : "#2980b9";
+        var badgeLabel = isEvent ? "Historical Landslide Event" : "Provisional Background Sample";
+        var tile = escapeHtml(d[3]);
+        var subreg = escapeHtml(d[4]);
+        var lat = Number(d[5]).toFixed(4);
+        var lon = Number(d[6]).toFixed(4);
+        var elev = formatVal(d[7], null, 1);
+        var slope = formatVal(d[8], null, 2);
+
+        var riskVal = isStale ? '<span style="color:#95a5a6; font-style:italic;">Unassessed (Stale)</span>' : formatVal(d[9], null, 2);
+        var catName = isStale ? "UNASSESSED" : escapeHtml(d[10]);
+        var catColor = isStale ? "#95a5a6" : (d[11] || "#95a5a6");
+        var ftier = isStale ? "UNASSESSED_STALE" : escapeHtml(d[12]);
+
+        var tbal = formatVal(d[13], null, 3);
+        var tbalTier = escapeHtml(d[14]);
+        var tunw = formatVal(d[15], null, 3);
+
+        var r1 = formatVal(d[16], 'mm', 2);
+        var r3 = formatVal(d[17], 'mm', 2);
+        var r6 = formatVal(d[18], 'mm', 2);
+        var r12 = formatVal(d[19], 'mm', 2);
+        var r24 = formatVal(d[20], 'mm', 2);
+        var rindex = formatVal(d[21], null, 3);
+        var rpct = formatVal(d[22], null, 3);
+        var statusStr = isStale ? "STALE_DATA_UNASSESSED" : escapeHtml(d[23]);
+        var latencyStr = (currentLatencyHours !== null && !isNaN(currentLatencyHours)) ? currentLatencyHours.toFixed(1) + "h" : "Unavailable";
+
+        return '<div style="font-family: Arial, sans-serif; font-size:12px; width:330px; line-height:1.45; color:#2c3e50;">' +
+            '<div style="border-bottom:2px solid ' + catColor + '; padding-bottom:6px; margin-bottom:8px;">' +
+                '<div style="display:flex; justify-content:space-between; align-items:center;">' +
+                    '<span style="font-size:14px; font-weight:bold; color:#1a252f;">' + recId + '</span>' +
+                    '<span style="background:' + catColor + '; color:white; padding:2px 8px; border-radius:12px; font-weight:bold; font-size:11px;">' + catName + '</span>' +
+                '</div>' +
+                '<div style="margin-top:4px;"><span style="background:' + badgeBg + '; color:white; padding:2px 7px; border-radius:4px; font-weight:bold;">' + badgeLabel + '</span></div>' +
+                '<div style="font-size:11px; color:#7f8c8d; margin-top:3px;">DEM Tile: <b>' + tile + '</b> &nbsp;|&nbsp; Subregion: <b>' + subreg + '</b></div>' +
+                '<div style="font-size:10.5px; color:#5d6d7e; margin-top:2px;">Coverage: <b>Limited Western Ghats Pilot</b> (14 DEM tiles, 1,582 locations)</div>' +
+            '</div>' +
+            '<table style="width:100%; border-collapse:collapse; margin-bottom:8px; font-size:11px;">' +
+                '<tr><td style="color:#7f8c8d;">Coordinates:</td><td style="font-weight:bold; text-align:right;">' + lat + '° N, ' + lon + '° E</td></tr>' +
+                '<tr><td style="color:#7f8c8d;">Elevation / Slope:</td><td style="font-weight:bold; text-align:right;">' + elev + ' m &nbsp;|&nbsp; ' + slope + '°</td></tr>' +
+            '</table>' +
+            '<div style="background:#f8f9fa; border:1px solid #e9ecef; border-radius:6px; padding:7px 9px; margin-bottom:8px;">' +
+                '<div style="font-weight:bold; color:#2c3e50; margin-bottom:4px; font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">Dynamic Hazard Screening (Stage 6D)</div>' +
+                '<div style="display:flex; justify-content:space-between; margin-bottom:2px;"><span>Dynamic Risk Index:</span><span style="font-weight:bold; font-size:13px; color:' + catColor + ';">' + riskVal + ' / 100</span></div>' +
+                '<div style="display:flex; justify-content:space-between; font-size:11px; color:#555;"><span>Relative Category Tier:</span><span style="font-weight:bold;">' + catName + '</span></div>' +
+                '<div style="display:flex; justify-content:space-between; font-size:11px; color:#555;"><span>Fixed Benchmark Tier:</span><span style="font-weight:bold;">' + ftier + '</span></div>' +
+                '<div style="display:flex; justify-content:space-between; font-size:11px; color:#555; margin-top:2px; border-top:1px dashed #ddd; padding-top:2px;"><span>Balanced Terrain Prob (Used in Risk):</span><span style="font-weight:bold;">' + tbal + ' (' + tbalTier + ')</span></div>' +
+                '<div style="display:flex; justify-content:space-between; font-size:11px; color:#555; margin-top:2px;"><span>Unweighted Terrain Prob (Comparison Only):</span><span style="font-weight:bold;">' + tunw + '</span></div>' +
+            '</div>' +
+            '<div style="background:#f4f9fd; border:1px solid #d0e3f0; border-radius:6px; padding:7px 9px; margin-bottom:8px;">' +
+                '<div style="font-weight:bold; color:#1b4f72; margin-bottom:4px; font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">NASA GPM IMERG Rainfall (Early Run V07C)</div>' +
+                '<table style="width:100%; border-collapse:collapse; font-size:11px;">' +
+                    '<tr style="border-bottom:1px solid #e1edf5;"><td style="color:#546e7a;">1-hour accumulation:</td><td style="text-align:right; font-weight:bold;">' + r1 + '</td></tr>' +
+                    '<tr style="border-bottom:1px solid #e1edf5;"><td style="color:#546e7a;">3-hour accumulation:</td><td style="text-align:right; font-weight:bold;">' + r3 + '</td></tr>' +
+                    '<tr style="border-bottom:1px solid #e1edf5;"><td style="color:#546e7a;">6-hour accumulation:</td><td style="text-align:right; font-weight:bold;">' + r6 + '</td></tr>' +
+                    '<tr style="border-bottom:1px solid #e1edf5;"><td style="color:#546e7a;">12-hour accumulation:</td><td style="text-align:right; font-weight:bold;">' + r12 + '</td></tr>' +
+                    '<tr style="border-bottom:1px solid #e1edf5;"><td style="color:#546e7a; font-weight:bold;">24-hour accumulation:</td><td style="text-align:right; font-weight:bold; color:#1b4f72;">' + r24 + '</td></tr>' +
+                    '<tr><td style="color:#546e7a;">Rainfall Intensity Index:</td><td style="text-align:right; font-weight:bold;">' + rindex + ' (Percentile: ' + rpct + ')</td></tr>' +
+                '</table>' +
+                '<div style="font-size:10px; color:#78909c; margin-top:4px;">Obs End: <b>' + escapeHtml(obsEndUtc) + '</b> (' + latencyStr + ' latency) | Status: <b>' + statusStr + '</b></div>' +
+            '</div>' +
+            '<div style="font-size:9.5px; color:#7f8c8d; line-height:1.3; background:#fff8e1; border:1px solid #ffe082; padding:5px 7px; border-radius:4px;">' +
+                '<b>Notice:</b> Limited Western Ghats pilot screening only (14 validated DEM tiles, 1,582 locations: 182 historical events &amp; 1,400 background samples); does not imply complete Western Ghats coverage. Not an official government warning, safety directive, or calibrated slope failure probability.' +
+            '</div>' +
+        '</div>';
+    }
+
+    function updateFreshnessStatus() {
+        var freshRes = computeFreshness();
+        isStale = freshRes.isStale;
+        currentLatencyHours = freshRes.latencyHours;
+        currentStatusStr = freshRes.statusStr;
+
+        var badgeElem = document.getElementById("dashboard-freshness-badge");
+        if (badgeElem) {
+            if (isStale) {
+                badgeElem.style.background = "#fdecea";
+                badgeElem.style.color = "#c0392b";
+                badgeElem.textContent = (isNaN(currentLatencyHours) || currentLatencyHours === null) ?
+                    "Latency: Unavailable (STALE / UNASSESSED)" :
+                    "Latency: " + currentLatencyHours.toFixed(1) + "h (STALE / UNASSESSED)";
+            } else {
+                badgeElem.style.background = "#e8f8f5";
+                badgeElem.style.color = "#117864";
+                badgeElem.textContent = "Latency: " + currentLatencyHours.toFixed(1) + "h (SUCCESS)";
+            }
+        }
+
+        var cLow = document.getElementById("wg-count-low");
+        var cMod = document.getElementById("wg-count-mod");
+        var cHigh = document.getElementById("wg-count-high");
+        var cVHigh = document.getElementById("wg-count-vhigh");
+        var cUnass = document.getElementById("wg-count-unassessed");
+        if (cLow) cLow.textContent = isStale ? "0 (0.0%)" : formatInt(freshCategoryCounts.Low) + " (" + (freshCategoryCounts.Low / totalLocations * 100).toFixed(1) + "%)";
+        if (cMod) cMod.textContent = isStale ? "0 (0.0%)" : formatInt(freshCategoryCounts.Moderate) + " (" + (freshCategoryCounts.Moderate / totalLocations * 100).toFixed(1) + "%)";
+        if (cHigh) cHigh.textContent = isStale ? "0 (0.0%)" : formatInt(freshCategoryCounts.High) + " (" + (freshCategoryCounts.High / totalLocations * 100).toFixed(1) + "%)";
+        if (cVHigh) cVHigh.textContent = isStale ? "0 (0.0%)" : formatInt(freshCategoryCounts.VeryHigh) + " (" + (freshCategoryCounts.VeryHigh / totalLocations * 100).toFixed(1) + "%)";
+        if (cUnass) cUnass.textContent = isStale ? formatInt(totalLocations) + " (100.0%)" : formatInt(freshCategoryCounts.Unassessed) + " (" + (freshCategoryCounts.Unassessed / totalLocations * 100).toFixed(1) + "%)";
+
+        for (var i = 0; i < riskMarkers.length; i++) {
+            var item = riskMarkers[i];
+            var pCol = isStale ? "#95a5a6" : (item.data[11] || "#95a5a6");
+            item.marker.setStyle({
+                color: item.isEvent ? "#2c3e50" : pCol,
+                fillColor: pCol
+            });
+            var riskTip = isStale ?
+                ("UNASSESSED Risk (Stale Data): " + item.data[1]) :
+                ((item.isEvent ? "EVENT" : "BACKGROUND") + ": " + item.data[1] + " | " + item.data[10] + " Risk");
+            item.marker.setTooltipContent(riskTip);
+        }
+
+        for (var j = 0; j < rainMarkers.length; j++) {
+            var rItem = rainMarkers[j];
+            var rCol = isStale ? "#95a5a6" : (rItem.data[24] || "#95a5a6");
+            rItem.marker.setStyle({ color: rCol, fillColor: rCol });
+            var rainTip = isStale ?
+                ("Rain: UNASSESSED (Stale GPM Data) - " + rItem.data[1]) :
+                (rItem.data[1] + ": 24h Rain: " + (rItem.data[20] !== null ? Number(rItem.data[20]).toFixed(2) + " mm" : "Unavailable"));
+            rItem.marker.setTooltipContent(rainTip);
+        }
+    }
+
+    function populateLayers() {
+        var lgRisk = __LAYER_RISK_NAME__;
+        var lgRain = __LAYER_RAIN_NAME__;
+        var lgTerrain = __LAYER_TERRAIN_NAME__;
+        var lgEvents = __LAYER_EVENTS_NAME__;
+        var lgBackground = __LAYER_BG_NAME__;
+
+        for (var i = 0; i < wgRecords.length; i++) {
+            var d = wgRecords[i];
+            var isEvent = (d[2] === "historical_landslide");
+            var latlng = [d[5], d[6]];
+            var pFn = (function(rec) {
+                return function() { return renderPopupHtml(rec); };
+            })(d);
+            var pOpts = { maxWidth: 350 };
+
+            var mRisk = L.circleMarker(latlng, {
+                radius: isEvent ? 5.5 : 4.0,
+                color: isEvent ? "#2c3e50" : d[11],
+                weight: isEvent ? 1.5 : 1.0,
+                fill: true,
+                fillColor: d[11],
+                fillOpacity: 0.85
+            });
+            mRisk.bindTooltip((isEvent ? "EVENT" : "BACKGROUND") + ": " + d[1] + " | " + d[10] + " Risk");
+            mRisk.bindPopup(pFn, pOpts);
+            mRisk.addTo(lgRisk);
+            riskMarkers.push({ marker: mRisk, layer: mRisk, data: d, isEvent: isEvent });
+
+            var mRain = L.circleMarker(latlng, {
+                radius: 4.5,
+                color: d[24],
+                weight: 1.0,
+                fill: true,
+                fillColor: d[24],
+                fillOpacity: 0.80
+            });
+            mRain.bindTooltip(d[1] + ": 24h Rain: " + (d[20] !== null ? Number(d[20]).toFixed(2) + " mm" : "Unavailable"));
+            mRain.bindPopup(pFn, pOpts);
+            mRain.addTo(lgRain);
+            rainMarkers.push({ marker: mRain, layer: mRain, data: d });
+
+            var mTerrain = L.circleMarker(latlng, {
+                radius: 4.5,
+                color: d[25],
+                weight: 1.0,
+                fill: true,
+                fillColor: d[25],
+                fillOpacity: 0.80
+            });
+            mTerrain.bindTooltip(d[1] + ": Unweighted Terrain Prob: " + (d[15] !== null ? Number(d[15]).toFixed(3) : "Unavailable"));
+            mTerrain.bindPopup(pFn, pOpts);
+            mTerrain.addTo(lgTerrain);
+
+            if (isEvent) {
+                var mEv = L.circleMarker(latlng, {
+                    radius: 6.5,
+                    color: "#1a252f",
+                    weight: 2.0,
+                    fill: true,
+                    fillColor: d[11],
+                    fillOpacity: 0.90
+                });
+                mEv.bindTooltip("EVENT: " + d[1] + " (" + d[10] + ")");
+                mEv.bindPopup(pFn, pOpts);
+                mEv.addTo(lgEvents);
+            } else {
+                var mBg = L.circleMarker(latlng, {
+                    radius: 3.5,
+                    color: d[11],
+                    weight: 0.8,
+                    fill: true,
+                    fillColor: d[11],
+                    fillOpacity: 0.75
+                });
+                mBg.bindTooltip("BACKGROUND: " + d[1] + " (" + d[10] + ")");
+                mBg.bindPopup(pFn, pOpts);
+                mBg.addTo(lgBackground);
+            }
+        }
+    }
+
+    if (typeof window !== 'undefined') {
+        window.computeFreshness = computeFreshness;
+        window.updateFreshnessStatus = updateFreshnessStatus;
+        window.renderPopupHtml = renderPopupHtml;
+        window.riskMarkers = riskMarkers;
+        window.rainMarkers = rainMarkers;
+        window.getIsStale = function() { return isStale; };
+        window.getCurrentLatencyHours = function() { return currentLatencyHours; };
+        window.setObservationEndTimeForTesting = function(newUtcStr) {
+            obsEndUtc = newUtcStr;
+            updateFreshnessStatus();
+        };
+    }
+
+    function initMap() {
+        populateLayers();
+        updateFreshnessStatus();
+        setInterval(updateFreshnessStatus, 60000);
+    }
+
+    if (document.readyState === "complete") {
+        initMap();
+    } else if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initMap);
+    } else {
+        window.addEventListener("load", initMap);
+    }
+})();
+</script>
+"""
+
+    client_script = (
+        client_script_template
+        .replace("__JSON_WG_RECORDS__", json_wg_records)
+        .replace("__OBS_END_UTC_JSON__", json.dumps(str(obs_end_utc)))
+        .replace("__TOTAL_LOCATIONS__", str(len(df)))
+        .replace("__COUNT_LOW__", str(count_low))
+        .replace("__COUNT_MOD__", str(count_mod))
+        .replace("__COUNT_HIGH__", str(count_high))
+        .replace("__COUNT_VHIGH__", str(count_vhigh))
+        .replace("__COUNT_UNASSESSED__", str(count_unassessed))
+        .replace("__LATENCY_HOURS__", f"{latency_hours:.4f}")
+        .replace("__SHARED_FRESHNESS_JS__", shared_freshness_js)
+        .replace("__LAYER_RISK_NAME__", layer_dynamic_risk.get_name())
+        .replace("__LAYER_RAIN_NAME__", layer_rainfall.get_name())
+        .replace("__LAYER_TERRAIN_NAME__", layer_terrain.get_name())
+        .replace("__LAYER_EVENTS_NAME__", layer_events.get_name())
+        .replace("__LAYER_BG_NAME__", layer_background.get_name())
+    )
+    map_obj.get_root().html.add_child(folium.Element(client_script))
+
+    # 7. Add Floating Header & Legend Dashboard Overlay
     dashboard_card_html = f"""
     <div style="
         position: fixed;
@@ -773,26 +1031,32 @@ def create_western_ghats_dynamic_risk_map(
         border: 1px solid #bdc3c7;
         border-radius: 8px;
         box-shadow: 0 4px 15px rgba(0,0,0,0.15);
-        max-width: 410px;
+        max-width: 425px;
         font-family: 'Segoe UI', Arial, sans-serif;
         color: #2c3e50;
         line-height: 1.4;
     ">
         <div style="font-size: 15px; font-weight: bold; color: #1a252f; margin-bottom: 2px;">
-            Western Ghats Dynamic Landslide Hazard Map
+            Western Ghats Limited Pilot — Dynamic Landslide Hazard Map
         </div>
         <div style="font-size: 11px; color: #7f8c8d; margin-bottom: 8px;">
-            Stage 6E Deliverable &nbsp;|&nbsp; 14 DEM Tiles (1,582 Locations)
+            Limited Western Ghats Pilot Only (Stage 6E) &nbsp;|&nbsp; 14 Validated DEM Tiles · 1,582 Locations
         </div>
 
-        <div style="display: flex; gap: 8px; margin-bottom: 8px; font-size: 11px;">
+        <div style="display: flex; gap: 6px; margin-bottom: 8px; font-size: 11px; flex-wrap: wrap;">
             <div style="background: #eef2f5; padding: 4px 7px; border-radius: 4px;">
-                <b>182</b> Events
+                <b>14</b> Validated DEM Tiles
             </div>
             <div style="background: #eef2f5; padding: 4px 7px; border-radius: 4px;">
-                <b>1,400</b> Background
+                <b>1,582</b> Locations
             </div>
-            <div style="background: #e8f8f5; color: #117864; padding: 4px 7px; border-radius: 4px; font-weight: bold;">
+            <div style="background: #eef2f5; padding: 4px 7px; border-radius: 4px;">
+                <b>182</b> Historical Events
+            </div>
+            <div style="background: #eef2f5; padding: 4px 7px; border-radius: 4px;">
+                <b>1,400</b> Background Samples
+            </div>
+            <div id="dashboard-freshness-badge" style="background: #e8f8f5; color: #117864; padding: 4px 7px; border-radius: 4px; font-weight: bold;">
                 Latency: {latency_hours:.1f}h (SUCCESS)
             </div>
         </div>
@@ -803,41 +1067,127 @@ def create_western_ghats_dynamic_risk_map(
         </div>
 
         <div style="font-size: 11px; font-weight: bold; margin-bottom: 5px; color: #2c3e50; text-transform: uppercase; letter-spacing: 0.5px;">
-            Dynamic Screening Categories (Regional Quantiles)
+            Dynamic Screening Categories (Limited Pilot Quantiles)
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr; gap: 4px; font-size: 11.5px; margin-bottom: 10px;">
             <div style="display: flex; align-items: center; justify-content: space-between;">
                 <span><span style="display:inline-block; width:12px; height:12px; background:{CATEGORY_COLORS['Low']}; border-radius:50%; margin-right:6px; vertical-align:middle;"></span>Low Risk (&lt; {p50:.2f}, &lt; P50)</span>
-                <b>{count_low:,} ({count_low/len(df)*100:.1f}%)</b>
+                <b id="wg-count-low">{count_low:,} ({count_low/len(df)*100:.1f}%)</b>
             </div>
             <div style="display: flex; align-items: center; justify-content: space-between;">
                 <span><span style="display:inline-block; width:12px; height:12px; background:{CATEGORY_COLORS['Moderate']}; border-radius:50%; margin-right:6px; vertical-align:middle;"></span>Moderate Risk ({p50:.2f}–{p80:.2f}, P50–P80)</span>
-                <b>{count_mod:,} ({count_mod/len(df)*100:.1f}%)</b>
+                <b id="wg-count-mod">{count_mod:,} ({count_mod/len(df)*100:.1f}%)</b>
             </div>
             <div style="display: flex; align-items: center; justify-content: space-between;">
                 <span><span style="display:inline-block; width:12px; height:12px; background:{CATEGORY_COLORS['High']}; border-radius:50%; margin-right:6px; vertical-align:middle;"></span>High Risk ({p80:.2f}–{p95:.2f}, P80–P95)</span>
-                <b>{count_high:,} ({count_high/len(df)*100:.1f}%)</b>
+                <b id="wg-count-high">{count_high:,} ({count_high/len(df)*100:.1f}%)</b>
             </div>
             <div style="display: flex; align-items: center; justify-content: space-between;">
                 <span><span style="display:inline-block; width:12px; height:12px; background:{CATEGORY_COLORS['Very High']}; border-radius:50%; margin-right:6px; vertical-align:middle;"></span>Very High Risk (≥ {p95:.2f}, P95+)</span>
-                <b style="color:#c0392b;">{count_vhigh:,} ({count_vhigh/len(df)*100:.1f}%)</b>
+                <b id="wg-count-vhigh" style="color:#c0392b;">{count_vhigh:,} ({count_vhigh/len(df)*100:.1f}%)</b>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span><span style="display:inline-block; width:12px; height:12px; background:{CATEGORY_COLORS['UNASSESSED_MISSING_RAINFALL']}; border-radius:50%; margin-right:6px; vertical-align:middle;"></span>Unassessed / Stale (&gt;12h)</span>
+                <b id="wg-count-unassessed">{count_unassessed:,} ({count_unassessed/len(df)*100:.1f}%)</b>
             </div>
         </div>
 
         <div style="font-size: 9.5px; color: #7f8c8d; line-height: 1.35; border-top: 1px solid #ecf0f1; padding-top: 6px;">
-            <b>NOTICE:</b> {DISCLAIMER_TEXT}. Relative indices are uncalibrated situational indicators and do not represent official early warnings or physical landslide failure probabilities.
+            <b>LIMITED PILOT COVERAGE:</b> Current coverage is a limited Western Ghats pilot only (14 validated DEM tiles, 1,582 locations: 182 historical events + 1,400 background samples; no fabricated 5 km grid or duplicated records). Does not imply complete Western Ghats coverage. <b>NOTICE:</b> {DISCLAIMER_TEXT}. Relative indices are not official early warnings or physical failure probabilities.
         </div>
     </div>
     """
     map_obj.get_root().html.add_child(folium.Element(dashboard_card_html))
 
-    # 8. Save Map HTML
+    # 8. Save Map HTML Atomically & Publish Synchronized GeoJSON/Metadata
     output_html_path.parent.mkdir(parents=True, exist_ok=True)
-    map_obj.save(str(output_html_path))
+    tmp_html = output_html_path.with_name(f"{output_html_path.name}.tmp_{os.getpid()}")
+    map_obj.save(str(tmp_html))
+    os.replace(tmp_html, output_html_path)
+    html_size = output_html_path.stat().st_size
 
-    print(f"\n4. Successfully generated GIS map HTML: {output_html_path.name}")
-    print(f"   - File size: {output_html_path.stat().st_size:,} bytes")
+    if is_default_prod or not sync_geojson_path.exists():
+        geo_res = export_western_ghats_dynamic_risk_geojson(
+            input_csv_path=input_csv_path,
+            input_metadata_path=input_metadata_path,
+            output_geojson_path=DEFAULT_POINT_GEOJSON if is_default_prod else sync_geojson_path,
+            overwrite=True,
+        )
+        if is_default_prod and DEFAULT_POINT_GEOJSON.exists() and sync_geojson_path != DEFAULT_POINT_GEOJSON:
+            atomic_copy_file(DEFAULT_POINT_GEOJSON, sync_geojson_path)
+    else:
+        geo_res = None
+
+    map_metadata = {
+        "stage": "Stage 6E — Western Ghats Limited Pilot Dynamic GIS Risk Map",
+        "region": "Western Ghats",
+        "coverage_scope": "LIMITED_PILOT",
+        "complete_region_coverage": False,
+        "coverage_note": "Limited Western Ghats pilot only: 14 validated DEM tiles, 1,582 locations (182 historical events + 1,400 background samples). Does not imply complete Western Ghats coverage; no fabricated 5 km grid or duplicated records.",
+        "dem_tiles_count": len(unique_tiles),
+        "total_locations": len(df),
+        "historical_events_count": hist_event_count,
+        "provisional_background_samples_count": bg_sample_count,
+        "relative_category_cutoffs": {
+            "P50_low_to_moderate": p50,
+            "P80_moderate_to_high": p80,
+            "P95_high_to_very_high": p95,
+        },
+        "gpm_observation_metadata": {
+            "observation_start_utc": obs_start_utc,
+            "observation_end_utc": obs_end_utc,
+            "latency_hours": latency_hours,
+            "freshness_status": "SUCCESS",
+            "is_24h_complete": True,
+        },
+        "generation_timestamp_utc": gen_ts_utc,
+        "html_size_bytes": html_size,
+        "disclaimer": DISCLAIMER_TEXT,
+    }
+    atomic_write_json(meta_out_path, map_metadata)
+
+    validation_report = {
+        "status": "PASSED",
+        "stage": "Stage 6E — Western Ghats Limited Pilot Dynamic GIS Risk Map",
+        "generation_timestamp_utc": gen_ts_utc,
+        "coverage_scope": "LIMITED_PILOT",
+        "complete_region_coverage": False,
+        "location_count": len(df),
+        "dem_tiles_count": len(unique_tiles),
+        "outputs": {
+            "html_map_path": str(output_html_path),
+            "html_map_size_bytes": html_size,
+            "point_geojson_path": str(sync_geojson_path),
+            "map_metadata_path": str(meta_out_path),
+        },
+        "primary_screening_categories": {
+            "Low": count_low,
+            "Moderate": count_mod,
+            "High": count_high,
+            "Very High": count_vhigh,
+            "UNASSESSED": count_unassessed,
+        },
+        "relative_category_cutoffs": {
+            "P50": p50,
+            "P80": p80,
+            "P95": p95,
+        },
+        "validation_checks": {
+            "location_count_1582": bool(len(df) == EXPECTED_LOCATIONS_COUNT),
+            "all_14_tiles_present": bool(len(unique_tiles) == EXPECTED_TILES_COUNT),
+            "events_182_retained": bool(hist_event_count == EXPECTED_HISTORICAL_EVENTS_COUNT),
+            "background_1400_retained": bool(bg_sample_count == EXPECTED_BACKGROUND_SAMPLES_COUNT),
+            "runtime_60s_freshness_guard_injected": True,
+            "compact_html_below_3mb": bool(html_size < 3_000_000),
+            "threshold_validation_passed": True,
+        },
+        "disclaimer": DISCLAIMER_TEXT,
+    }
+    atomic_write_json(val_report_path, validation_report)
+
+    print(f"\n4. Successfully generated compact GIS map HTML: {output_html_path.name}")
+    print(f"   - File size: {html_size:,} bytes ({html_size / (1024 * 1024):.2f} MB)")
     print(f"   - Location count: {len(df):,}")
     print("   - Total layers: 5 feature groups + 2 tile layers")
     print("=" * 75)
@@ -848,6 +1198,10 @@ def create_western_ghats_dynamic_risk_map(
         "location_count": len(df),
         "layers_count": 5,
         "basemaps_count": 2,
+        "html_size_bytes": html_size,
+        "geojson_path": sync_geojson_path,
+        "metadata_path": meta_out_path,
+        "validation_report_path": val_report_path,
     }
 
 

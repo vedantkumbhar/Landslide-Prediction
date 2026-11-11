@@ -52,6 +52,16 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
+
+_WG_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_WG_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_WG_PROJECT_ROOT))
+
+from backend.gis_refresh_utils import (
+    atomic_write_csv,
+    atomic_write_json,
+    create_timestamped_backup,
+)
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -596,6 +606,10 @@ def run_western_ghats_dynamic_risk_pipeline(
     output_csv_path = output_dir / "western_ghats_dynamic_hazard_risk.csv"
     output_meta_path = output_dir / "hazard_risk_metadata.json"
     output_report_path = output_dir / "hazard_risk_validation_report.json"
+    create_timestamped_backup(
+        [output_csv_path, output_meta_path, output_report_path],
+        output_dir / "backup",
+    )
 
     try:
         disp_dir = output_dir.relative_to(PROJECT_ROOT)
@@ -603,7 +617,7 @@ def run_western_ghats_dynamic_risk_pipeline(
         disp_dir = output_dir
     print(f"\n5. Saving production outputs to: {disp_dir}")
 
-    risk_df.to_csv(output_csv_path, index=False)
+    atomic_write_csv(risk_df, output_csv_path)
     print(f"   - Location Risk CSV: {output_csv_path.name} ({len(risk_df)} rows, {len(risk_df.columns)} columns)")
 
     # Metadata JSON
@@ -654,8 +668,7 @@ def run_western_ghats_dynamic_risk_pipeline(
         "summary_statistics": report["summary_statistics"],
         "disclaimer": DISCLAIMER_TEXT,
     }
-    with open(output_meta_path, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, indent=2)
+    atomic_write_json(output_meta_path, metadata)
     print(f"   - Metadata JSON:     {output_meta_path.name}")
 
     # Validation Report JSON
@@ -667,8 +680,7 @@ def run_western_ghats_dynamic_risk_pipeline(
         "relative_thresholds": report.get("relative_category_thresholds", {}),
         "tile_distribution": risk_df["tile"].value_counts().to_dict(),
     }
-    with open(output_report_path, "w", encoding="utf-8") as f:
-        json.dump(val_report, f, indent=2)
+    atomic_write_json(output_report_path, val_report)
     print(f"   - Validation Report: {output_report_path.name}")
 
     print("\n" + "=" * 75)

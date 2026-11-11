@@ -61,6 +61,12 @@ from backend.refresh_western_ghats_rainfall import (
     DEFAULT_ARCHIVE_DIR,
     EXISTING_RAW_DIRS,
 )
+from backend.gis_refresh_utils import (
+    atomic_write_csv,
+    atomic_write_json,
+    create_timestamped_backup,
+    resolve_gpm_window_with_telemetry,
+)
 
 # Input and Output Defaults
 DEFAULT_GRID_CSV = (
@@ -142,136 +148,32 @@ def resolve_gpm_observation_window(
 ) -> Tuple[Optional[List[Dict]], Optional[datetime], str, float, List[datetime]]:
     """
     Resolve and retrieve the 24-hour GPM IMERG Early Run observation window.
-    Evaluates freshness against current UTC time:
-    - SUCCESS: Complete 48 contiguous granules, latency <= 12.0h
-    - STALE_DATA: Complete 48 contiguous granules, latency > 12.0h
-    - INCOMPLETE_DATA: < 48 granules available
-    Returns: (granules_list, observation_end_utc, status, latency_hours, missing_timestamps)
+    Delegates to shared telemetry resolver while preserving the 5-tuple API.
     """
-    ref_now = now_utc or datetime.now(timezone.utc)
-    raw_directories = raw_dirs or EXISTING_RAW_DIRS
-    local_index = LocalGranuleIndex(raw_directories)
-    downloader = GPMGranuleDownloader(archive_dir=archive_dir)
+    granules, obs_end, status, latency_h, missing, _ = resolve_gpm_window_with_telemetry(
+        archive_dir=archive_dir,
+        raw_dirs=raw_dirs,
+        target_end_time=target_end_time,
+        allow_download=allow_download,
+        workers=workers,
+        now_utc=now_utc,
+        max_latency_hours=MAX_DATA_LATENCY_HOURS,
+    )
+    return granules, obs_end, status, latency_h, missing
 
-    target_granules: Optional[List[Dict]] = None
-    target_end: Optional[datetime] = None
-    missing_starts: List[datetime] = []
 
-    # 1. Attempt online CMR discovery if target not specified and downloader has token
-    if target_end_time is None and allow_download and downloader.token:
-        print("\nQuerying NASA CMR for latest available contiguous 24h GPM IMERG window...")
-        try:
-            candidate_end, online_granules, missing = downloader.discover_latest_contiguous_window_online()
-            if candidate_end is not None and online_granules and not missing:
-                print(f"Discovered contiguous CMR window ending at: {candidate_end.strftime('%Y-%m-%dT%H:%M:%SZ')}")
-                target_end = candidate_end
-                target_granules = online_granules
-            elif candidate_end is not None and missing:
-                print(f"Notice: Latest CMR window ending at {candidate_end.strftime('%Y-%m-%dT%H:%M:%SZ')} has {len(missing)} missing intervals.")
-                target_end = candidate_end
-                missing_starts = missing
-        except Exception as exc:
-            print(f"Notice: Online CMR query encountered an issue ({exc}). Checking local archive.")
-
-    elif target_end_time is not None:
-        target_end = target_end_time
-
-    # 2. If target_end established, ensure local granules exist
-    if target_end is not None:
-        expected_starts = [
-            target_end - timedelta(minutes=30 * (48 - i))
-            for i in range(48)
-        ]
-        local_index.build_index()
-        cached_items = {}
-        to_download = []
-
-        pre_discovered_map = {g["start"]: g for g in (target_granules or [])}
-
-        for s_dt in expected_starts:
-            cached = local_index.get_granule(s_dt)
-            if cached and is_valid_hdf5_granule(cached["path"]):
-                cached_items[s_dt] = cached
-                continue
-
-            item = pre_discovered_map.get(s_dt)
-            if not item and allow_download and downloader.token:
-                w_end = s_dt + timedelta(minutes=30)
-                disc = downloader.search_cmr_granules(s_dt, w_end)
-                if disc:
-                    item = disc[0]
-
-            if item and allow_download:
-                to_download.append(item)
-            else:
-                missing_starts.append(s_dt)
-
-        if to_download and allow_download:
-            print(f"Downloading {len(to_download)} missing granules into archive (workers={workers})...")
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-            with ThreadPoolExecutor(max_workers=workers) as executor:
-                futures = {executor.submit(downloader.download_single_granule, it): it for it in to_download}
-                for f in as_completed(futures):
-                    try:
-                        p = f.result()
-                        # Re-index downloaded granule
-                        s_dt, e_dt = parse_granule_times(p.name)
-                        cached_items[s_dt] = {"path": p, "filename": p.name, "start": s_dt, "end": e_dt}
-                    except Exception as dl_err:
-                        it = futures[f]
-                        print(f"Download failed for {it.get('filename')}: {dl_err}")
-                        missing_starts.append(it["start"])
-
-        # Check if all 48 expected starts are in cached_items
-        resolved_granules = []
-        for s_dt in expected_starts:
-            if s_dt in cached_items:
-                resolved_granules.append(cached_items[s_dt])
-            else:
-                if s_dt not in missing_starts:
-                    missing_starts.append(s_dt)
-
-        if len(resolved_granules) == 48 and not missing_starts:
-            target_granules = resolved_granules
-
-    # 3. Fallback to scanning local archive for latest contiguous 48-granule block if online failed
-    if target_granules is None or len(target_granules) < 48:
-        print("Scanning local archive directories for latest contiguous 48-granule block...")
-        local_index.build_index()
-        all_local = local_index.all_granules_sorted()
-        if all_local:
-            granule_map = {g["start"]: g for g in all_local}
-            available_starts = sorted(granule_map.keys())
-            for latest_start in reversed(available_starts):
-                c_end = latest_start + timedelta(minutes=30)
-                exp_starts = [c_end - timedelta(minutes=30 * (48 - i)) for i in range(48)]
-                miss = [s for s in exp_starts if s not in granule_map]
-                if not miss:
-                    target_granules = [granule_map[s] for s in exp_starts]
-                    target_end = c_end
-                    missing_starts = []
-                    break
-
-    # 4. Status and Latency Evaluation
-    if target_end is None or target_granules is None or len(target_granules) < 48:
-        latency_h = 999.0
-        status = "INCOMPLETE_DATA"
-        return target_granules, target_end, status, latency_h, missing_starts
-
-    latency_seconds = (ref_now - target_end).total_seconds()
-    if latency_seconds < 0.0:
-        raise ValueError(
-            f"Future observation timestamp detected: {target_end.isoformat()} is ahead of reference now {ref_now.isoformat()}"
-        )
-
-    latency_hours = latency_seconds / 3600.0
-
-    if latency_hours <= MAX_DATA_LATENCY_HOURS:
-        status = "SUCCESS"
-    else:
-        status = "STALE_DATA"
-
-    return target_granules, target_end, status, latency_hours, missing_starts
+def _backup_target_outputs(
+    output_dir: Path,
+    output_csv_path: Path,
+    validation_report_path: Path,
+) -> None:
+    """Create timestamped backups of existing Northeast GPM outputs before overwriting."""
+    backed = create_timestamped_backup(
+        [output_csv_path, validation_report_path],
+        output_dir / "backup",
+    )
+    for dest in backed:
+        print(f"   [BACKUP] Saved copy of existing file: {dest.name}")
 
 
 def integrate_northeast_gpm_rainfall(
@@ -294,6 +196,8 @@ def integrate_northeast_gpm_rainfall(
             raise FileExistsError(f"Output integrated CSV already exists: {output_csv_path}. Use --overwrite.")
         if validation_report_path.exists():
             raise FileExistsError(f"Validation report already exists: {validation_report_path}. Use --overwrite.")
+    else:
+        _backup_target_outputs(output_dir, output_csv_path, validation_report_path)
 
     print("=" * 75)
     print("STAGE 7.3: NORTHEAST INDIA GRID GPM RAINFALL INTEGRATION")
@@ -310,11 +214,14 @@ def integrate_northeast_gpm_rainfall(
 
     # 2. Resolve Observation Window and Granules
     print("\n2. Resolving 24-hour NASA GPM IMERG Early observation window...")
-    granules, obs_end_utc, status, latency_hours, missing_starts = resolve_gpm_observation_window(
-        archive_dir=archive_dir,
-        target_end_time=target_end_time,
-        allow_download=allow_download,
-        now_utc=ref_now,
+    granules, obs_end_utc, status, latency_hours, missing_starts, granule_telemetry = (
+        resolve_gpm_window_with_telemetry(
+            archive_dir=archive_dir,
+            target_end_time=target_end_time,
+            allow_download=allow_download,
+            now_utc=ref_now,
+            max_latency_hours=MAX_DATA_LATENCY_HOURS,
+        )
     )
 
     print(f"   - Observation End (UTC): {obs_end_utc.strftime('%Y-%m-%dT%H:%M:%SZ') if obs_end_utc else 'None'}")
@@ -427,9 +334,8 @@ def integrate_northeast_gpm_rainfall(
     if out_df["grid_id"].duplicated().any():
         raise ValueError("Duplicate grid_id in output integrated dataset")
 
-    # 6. Save Integrated CSV
-    output_csv_path.parent.mkdir(parents=True, exist_ok=True)
-    out_df.to_csv(output_csv_path, index=False)
+    # 6. Save Integrated CSV Atomically
+    atomic_write_csv(out_df, output_csv_path)
     print(f"\n6. Successfully saved integrated rainfall-terrain dataset:")
     print(f"   - File: {output_csv_path.name}")
     print(f"   - Rows: {len(out_df):,}")
@@ -449,11 +355,10 @@ def integrate_northeast_gpm_rainfall(
         grid_path=grid_csv_path,
         terrain_path=terrain_csv_path,
         ref_now=ref_now,
+        granule_telemetry=granule_telemetry,
     )
 
-    validation_report_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(validation_report_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2)
+    atomic_write_json(validation_report_path, report)
     print(f"   - Validation report saved: {validation_report_path.name}")
     print("=" * 75)
 
@@ -473,6 +378,7 @@ def _build_rainfall_validation_report(
     grid_path: Path,
     terrain_path: Path,
     ref_now: datetime,
+    granule_telemetry: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Compile comprehensive JSON validation report for Stage 7.3."""
     total = len(out_df)
@@ -533,6 +439,7 @@ def _build_rainfall_validation_report(
             "granules_count": len(granules) if granules else 0,
             "expected_granules_24h": EXPECTED_GRANULES_24H,
             "is_24h_complete": bool(out_df["gpm_24h_complete"].all()) if "gpm_24h_complete" in out_df else False,
+            "granule_telemetry": granule_telemetry or {},
         },
         "spatial_grid_matching": {
             "product_name": "NASA GPM IMERG Early Run V07C",

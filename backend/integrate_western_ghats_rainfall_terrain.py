@@ -341,6 +341,16 @@ def run_integration_pipeline(
             f"Output file already exists: {output_csv}\n"
             "Pass --force-overwrite to regenerate integrated dataset."
         )
+    if force_overwrite:
+        import sys as _sys
+        _wg_root = Path(__file__).resolve().parents[1]
+        if str(_wg_root) not in _sys.path:
+            _sys.path.insert(0, str(_wg_root))
+        from backend.gis_refresh_utils import create_timestamped_backup
+        create_timestamped_backup(
+            [output_csv, output_meta, output_report],
+            output_dir / "backup",
+        )
 
     # 1. Check rainfall freshness and status
     print(f"\n1. Verifying rainfall freshness from: {status_json.name}")

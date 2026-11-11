@@ -1,0 +1,26 @@
+{
+  "stage": "Stage 6E \u2014 Western Ghats Limited Pilot Dynamic GIS Risk Map",
+  "region": "Western Ghats",
+  "coverage_scope": "LIMITED_PILOT",
+  "complete_region_coverage": false,
+  "coverage_note": "Limited Western Ghats pilot only: 14 validated DEM tiles, 1,582 locations (182 historical events + 1,400 background samples). Does not imply complete Western Ghats coverage; no fabricated 5 km grid or duplicated records.",
+  "dem_tiles_count": 14,
+  "total_locations": 1582,
+  "historical_events_count": 182,
+  "provisional_background_samples_count": 1400,
+  "relative_category_cutoffs": {
+    "P50_low_to_moderate": 8.428217153217151,
+    "P80_moderate_to_high": 18.769975302475295,
+    "P95_high_to_very_high": 45.11823103448329
+  },
+  "gpm_observation_metadata": {
+    "observation_start_utc": "2026-11-10T12:00:00Z",
+    "observation_end_utc": "2026-11-11T12:00:00Z",
+    "latency_hours": 5.344,
+    "freshness_status": "SUCCESS",
+    "is_24h_complete": true
+  },
+  "generation_timestamp_utc": "2026-11-11T17:23:12Z",
+  "html_size_bytes": 490794,
+  "disclaimer": "EXPERIMENTAL PROVISIONAL SCREENING ONLY \u00b7 NOT AN OFFICIAL WARNING OR CALIBRATED PROBABILITY"
+}

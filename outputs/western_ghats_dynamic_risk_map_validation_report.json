@@ -1,0 +1,37 @@
+{
+  "status": "PASSED",
+  "stage": "Stage 6E \u2014 Western Ghats Limited Pilot Dynamic GIS Risk Map",
+  "generation_timestamp_utc": "2026-11-11T17:23:12Z",
+  "coverage_scope": "LIMITED_PILOT",
+  "complete_region_coverage": false,
+  "location_count": 1582,
+  "dem_tiles_count": 14,
+  "outputs": {
+    "html_map_path": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_map.html",
+    "html_map_size_bytes": 490794,
+    "point_geojson_path": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_hazard_risk.geojson",
+    "map_metadata_path": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_map_metadata.json"
+  },
+  "primary_screening_categories": {
+    "Low": 791,
+    "Moderate": 474,
+    "High": 237,
+    "Very High": 80,
+    "UNASSESSED": 0
+  },
+  "relative_category_cutoffs": {
+    "P50": 8.428217153217151,
+    "P80": 18.769975302475295,
+    "P95": 45.11823103448329
+  },
+  "validation_checks": {
+    "location_count_1582": true,
+    "all_14_tiles_present": true,
+    "events_182_retained": true,
+    "background_1400_retained": true,
+    "runtime_60s_freshness_guard_injected": true,
+    "compact_html_below_3mb": true,
+    "threshold_validation_passed": true
+  },
+  "disclaimer": "EXPERIMENTAL PROVISIONAL SCREENING ONLY \u00b7 NOT AN OFFICIAL WARNING OR CALIBRATED PROBABILITY"
+}

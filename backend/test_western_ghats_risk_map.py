@@ -45,6 +45,7 @@ from backend.create_western_ghats_risk_map import (
     EXPECTED_TILES_COUNT,
     EXPECTED_HISTORICAL_EVENTS_COUNT,
     EXPECTED_BACKGROUND_SAMPLES_COUNT,
+    MAX_DATA_LATENCY_HOURS,
     format_rainfall_val,
     format_score_val,
     safe_html,
@@ -54,10 +55,8 @@ from backend.export_western_ghats_dynamic_risk_geojson import (
     validate_stage6d_metadata_thresholds as validate_geojson_thresholds,
     DEFAULT_OUTPUT_GEOJSON,
     safe_value,
-    APPROVED_P50,
-    APPROVED_P80,
-    APPROVED_P95,
 )
+import re
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -140,6 +139,10 @@ class TestWesternGhatsRiskMap(unittest.TestCase):
         self.assertEqual(data["metadata"]["dem_tiles_count"], EXPECTED_TILES_COUNT)
         self.assertEqual(data["metadata"]["historical_events_count"], EXPECTED_HISTORICAL_EVENTS_COUNT)
         self.assertEqual(data["metadata"]["provisional_background_count"], EXPECTED_BACKGROUND_SAMPLES_COUNT)
+        self.assertEqual(data["metadata"]["coverage_scope"], "LIMITED_PILOT")
+        self.assertIs(data["metadata"]["complete_region_coverage"], False)
+        self.assertIn("Limited Pilot", data["metadata"]["title"])
+        self.assertIn("Limited Pilot", data["metadata"]["coverage_region"])
 
         feature_ids = set()
         for feat in data["features"]:
@@ -173,13 +176,14 @@ class TestWesternGhatsRiskMap(unittest.TestCase):
         features_by_id = {f["id"]: f for f in geojson_data["features"]}
         self.assertEqual(len(features_by_id), EXPECTED_LOCATIONS_COUNT)
 
-        # Verify category distribution matches Stage 6D source counts exactly:
-        # Low: 791, Moderate: 474, High: 237, Very High: 80
-        cat_counts = pd.Series([f["properties"]["primary_screening_category"] for f in features_by_id.values()]).value_counts()
-        self.assertEqual(cat_counts.get("Low", 0), 791)
-        self.assertEqual(cat_counts.get("Moderate", 0), 474)
-        self.assertEqual(cat_counts.get("High", 0), 237)
-        self.assertEqual(cat_counts.get("Very High", 0), 80)
+        # Verify category distribution matches Stage 6D source CSV counts dynamically
+        expected_cat_counts = df["primary_screening_category"].value_counts().to_dict()
+        cat_counts = pd.Series(
+            [f["properties"]["primary_screening_category"] for f in features_by_id.values()]
+        ).value_counts().to_dict()
+        for cat in ("Low", "Moderate", "High", "Very High"):
+            self.assertEqual(cat_counts.get(cat, 0), expected_cat_counts.get(cat, 0))
+        self.assertEqual(sum(cat_counts.values()), EXPECTED_LOCATIONS_COUNT)
 
         # Exhaustive 1,582 row-by-row verification
         for _, row in df.iterrows():
@@ -219,16 +223,37 @@ class TestWesternGhatsRiskMap(unittest.TestCase):
             self.assertAlmostEqual(props["gpm_24h_accumulation_mm"], float(row["gpm_24h_accumulation_mm"]), places=3)
 
     def test_strict_metadata_thresholds_zero_fallback(self):
-        """Test 4: Verify strict threshold validation and zero-fallback rejection in both scripts."""
+        """Test 4: Verify metadata-driven dynamic threshold validation and invalid-input rejection."""
         with open(DEFAULT_INPUT_METADATA, "r", encoding="utf-8") as f:
             valid_meta = json.load(f)
+
+        cutoffs = valid_meta["risk_formula_specification"]["relative_category_cutoffs"]
+        exp_p50 = float(cutoffs["P50_low_to_moderate"])
+        exp_p80 = float(cutoffs["P80_moderate_to_high"])
+        exp_p95 = float(cutoffs["P95_high_to_very_high"])
 
         # Valid metadata passes strictly in both map and geojson validators
         res_map = validate_map_thresholds(valid_meta)
         res_geo = validate_geojson_thresholds(valid_meta)
-        self.assertTrue(math.isclose(res_map["P50_low_to_moderate"], APPROVED_P50, rel_tol=1e-6))
-        self.assertTrue(math.isclose(res_geo["P80_moderate_to_high"], APPROVED_P80, rel_tol=1e-6))
-        self.assertTrue(math.isclose(res_geo["P95_high_to_very_high"], APPROVED_P95, rel_tol=1e-6))
+        self.assertTrue(0.0 < exp_p50 < exp_p80 < exp_p95 < 100.0)
+        self.assertTrue(math.isclose(res_map["P50_low_to_moderate"], exp_p50, rel_tol=1e-6))
+        self.assertTrue(math.isclose(res_geo["P80_moderate_to_high"], exp_p80, rel_tol=1e-6))
+        self.assertTrue(math.isclose(res_geo["P95_high_to_very_high"], exp_p95, rel_tol=1e-6))
+
+        # Simulated shifted valid quantile cutoffs must be accepted dynamically (no stale hardcoded lock)
+        meta_shifted = {
+            "risk_formula_specification": {
+                "relative_category_cutoffs": {
+                    "P50_low_to_moderate": 18.5,
+                    "P80_moderate_to_high": 42.25,
+                    "P95_high_to_very_high": 76.75,
+                }
+            }
+        }
+        res_shifted_map = validate_map_thresholds(meta_shifted)
+        res_shifted_geo = validate_geojson_thresholds(meta_shifted)
+        self.assertEqual(res_shifted_map["P50_low_to_moderate"], 18.5)
+        self.assertEqual(res_shifted_geo["P95_high_to_very_high"], 76.75)
 
         # Rejects missing relative_category_cutoffs
         with self.assertRaises(ValueError):
@@ -238,8 +263,8 @@ class TestWesternGhatsRiskMap(unittest.TestCase):
         meta_missing_p95 = {
             "risk_formula_specification": {
                 "relative_category_cutoffs": {
-                    "P50_low_to_moderate": APPROVED_P50,
-                    "P80_moderate_to_high": APPROVED_P80,
+                    "P50_low_to_moderate": exp_p50,
+                    "P80_moderate_to_high": exp_p80,
                 }
             }
         }
@@ -250,40 +275,66 @@ class TestWesternGhatsRiskMap(unittest.TestCase):
         meta_null = {
             "risk_formula_specification": {
                 "relative_category_cutoffs": {
-                    "P50_low_to_moderate": APPROVED_P50,
+                    "P50_low_to_moderate": exp_p50,
                     "P80_moderate_to_high": None,
-                    "P95_high_to_very_high": APPROVED_P95,
+                    "P95_high_to_very_high": exp_p95,
                 }
             }
         }
         with self.assertRaises(ValueError):
             validate_geojson_thresholds(meta_null)
 
+        # Rejects boolean threshold
+        meta_bool = {
+            "risk_formula_specification": {
+                "relative_category_cutoffs": {
+                    "P50_low_to_moderate": True,
+                    "P80_moderate_to_high": exp_p80,
+                    "P95_high_to_very_high": exp_p95,
+                }
+            }
+        }
+        with self.assertRaises(ValueError):
+            validate_map_thresholds(meta_bool)
+
         # Rejects non-finite (inf) threshold
         meta_inf = {
             "risk_formula_specification": {
                 "relative_category_cutoffs": {
                     "P50_low_to_moderate": float("inf"),
-                    "P80_moderate_to_high": APPROVED_P80,
-                    "P95_high_to_very_high": APPROVED_P95,
+                    "P80_moderate_to_high": exp_p80,
+                    "P95_high_to_very_high": exp_p95,
                 }
             }
         }
         with self.assertRaises(ValueError):
             validate_geojson_thresholds(meta_inf)
 
-        # Rejects diverging/tampered threshold
-        meta_tampered = {
+        # Rejects non-monotonic / reversed thresholds
+        meta_reversed = {
             "risk_formula_specification": {
                 "relative_category_cutoffs": {
-                    "P50_low_to_moderate": 10.0,
-                    "P80_moderate_to_high": APPROVED_P80,
-                    "P95_high_to_very_high": APPROVED_P95,
+                    "P50_low_to_moderate": 60.0,
+                    "P80_moderate_to_high": 40.0,
+                    "P95_high_to_very_high": 80.0,
                 }
             }
         }
         with self.assertRaises(ValueError):
-            validate_map_thresholds(meta_tampered)
+            validate_map_thresholds(meta_reversed)
+
+        # Rejects out-of-range thresholds (<= 0 or >= 100)
+        meta_out_of_range = {
+            "risk_formula_specification": {
+                "relative_category_cutoffs": {
+                    "P50_low_to_moderate": 0.0,
+                    "P80_moderate_to_high": exp_p80,
+                    "P95_high_to_very_high": 100.0,
+                }
+            }
+        }
+        with self.assertRaises(ValueError):
+            validate_geojson_thresholds(meta_out_of_range)
 
     def test_geojson_safe_value_booleans_and_nulls(self):
         """Test 5: Verify booleans remain true/false (not 1/0) and NaN/inf serialize as null."""
@@ -471,11 +522,14 @@ class TestWesternGhatsRiskMap(unittest.TestCase):
             latency_hours=6.4,
         )
 
-        # Popup clearly separates balanced model from unweighted model
+        # Popup clearly separates balanced model from unweighted model and preserves 5 GPM windows + pilot scope
         self.assertIn("Balanced Terrain Prob (Used in Risk):", popup_html)
         self.assertIn("0.885", popup_html)
         self.assertIn("Unweighted Terrain Prob (Comparison Only):", popup_html)
         self.assertIn("0.421", popup_html)
+        self.assertIn("Limited Western Ghats Pilot", popup_html)
+        for win_label in ("1-hour accumulation:", "3-hour accumulation:", "6-hour accumulation:", "12-hour accumulation:", "24-hour accumulation:"):
+            self.assertIn(win_label, popup_html)
 
     def test_overwrite_protection(self):
         """Test 11: Verify overwrite protection prevents replacing existing outputs without --overwrite."""
@@ -501,8 +555,17 @@ class TestWesternGhatsRiskMap(unittest.TestCase):
         self.assertEqual(res_geo["status"], "SUCCESS")
 
     def test_map_html_generation_and_layer_structure(self):
-        """Test 12: Generate standalone HTML map and verify 5 layers, Esri basemap, legend, and disclaimer."""
-        ref_now = datetime(2026, 11, 7, 8, 23, 0, tzinfo=timezone.utc)
+        """Test 12: Generate standalone compact Canvas HTML map and verify 5 layers, 60s JS freshness guard, and Node boundary behavior."""
+        from datetime import timedelta
+
+        with open(DEFAULT_INPUT_METADATA, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        gpm_meta = meta.get("gpm_observation_metadata", {})
+        obs_end_str = gpm_meta.get("observation_end_utc")
+        obs_dt = parse_iso8601_utc(obs_end_str)
+        self.assertIsNotNone(obs_dt)
+
+        ref_now = obs_dt + timedelta(hours=6)
         res = create_western_ghats_dynamic_risk_map(
             input_csv_path=DEFAULT_INPUT_CSV,
             input_metadata_path=DEFAULT_INPUT_METADATA,
@@ -512,7 +575,9 @@ class TestWesternGhatsRiskMap(unittest.TestCase):
         )
         self.assertEqual(res["status"], "SUCCESS")
         self.assertTrue(self.test_map_path.exists())
-        self.assertGreater(self.test_map_path.stat().st_size, 500_000)
+        html_size = self.test_map_path.stat().st_size
+        self.assertGreater(html_size, 100_000)
+        self.assertLess(html_size, 3_000_000)
 
         html_content = self.test_map_path.read_text(encoding="utf-8")
 
@@ -527,10 +592,182 @@ class TestWesternGhatsRiskMap(unittest.TestCase):
         self.assertIn("Historical Landslide Events (n=182)", html_content)
         self.assertIn("Provisional Background Samples (n=1,400)", html_content)
 
-        # Verify disclaimer and latency are present in HTML
+        # Verify limited Western Ghats pilot coverage transparency & exact counts
+        self.assertIn("Western Ghats Limited Pilot", html_content)
+        self.assertIn("Limited Western Ghats Pilot", html_content)
+        self.assertIn("does not imply complete Western Ghats coverage", html_content)
+        self.assertIn("<b>14</b> Validated DEM Tiles", html_content)
+        self.assertIn("<b>1,582</b> Locations", html_content)
+        self.assertIn("<b>182</b> Historical Events", html_content)
+        self.assertIn("<b>1,400</b> Background Samples", html_content)
+
+        # Verify disclaimer, dynamic freshness guard, and stale styling in HTML
         self.assertIn("EXPERIMENTAL PROVISIONAL SCREENING ONLY", html_content)
         self.assertIn("Observation Window (UTC)", html_content)
-        self.assertIn("Latency:", html_content)
+        self.assertIn("computeFreshness", html_content)
+        self.assertIn("updateFreshnessStatus", html_content)
+        self.assertIn("setInterval(updateFreshnessStatus, 60000)", html_content)
+        self.assertIn("#95a5a6", html_content)
+
+        # Execute embedded JS freshness + popup logic in Node.js across exact boundary & invalid scenarios
+        script_blocks = re.findall(r"<script[^>]*>(.*?)</script>", html_content, flags=re.DOTALL)
+        target_scripts = [s for s in script_blocks if "computeFreshness" in s and "wgRecords" in s]
+        self.assertGreaterEqual(len(target_scripts), 1, "Expected embedded script with computeFreshness and wgRecords")
+        script_code = re.sub(
+            r"var lg(Risk|Rain|Terrain|Events|Background)\s*=\s*[a-zA-Z0-9_]+;",
+            r"var lg\1 = feature_group_mock;",
+            target_scripts[0],
+        )
+
+        node_harness = f"""
+const assert = require('assert');
+const RealDate = Date;
+let fakeNowMs = RealDate.parse({json.dumps(obs_end_str)}) + 6 * 3600 * 1000;
+global.Date = class extends RealDate {{
+  constructor(...args) {{
+    if (args.length === 0) return new RealDate(fakeNowMs);
+    return new RealDate(...args);
+  }}
+  static now() {{ return fakeNowMs; }}
+  static parse(s) {{ return RealDate.parse(s); }}
+  static UTC(...args) {{ return RealDate.UTC(...args); }}
+}};
+
+const domStore = {{}};
+const getEl = (id) => {{
+  if (!domStore[id]) {{
+    domStore[id] = {{
+      id,
+      innerHTML: '',
+      textContent: '',
+      style: {{}},
+      className: '',
+      attributes: {{}},
+      setAttribute(k, v) {{ this.attributes[k] = v; }},
+      classList: {{ add() {{}}, remove() {{}} }},
+    }};
+  }}
+  return domStore[id];
+}};
+
+global.window = global;
+global.window.addEventListener = () => {{}};
+global.document = {{
+  readyState: 'complete',
+  getElementById: getEl,
+  addEventListener() {{}},
+}};
+const intervalCalls = [];
+global.setInterval = (fn, ms) => {{ intervalCalls.push(ms); return intervalCalls.length; }};
+
+const createdMarkers = [];
+const makeLayerGroup = () => ({{
+  layers: [],
+  addLayer(l) {{ this.layers.push(l); }},
+  clearLayers() {{ this.layers = []; }},
+  eachLayer(fn) {{ this.layers.forEach(fn); }},
+}});
+const feature_group_mock = makeLayerGroup();
+global.L = {{
+  canvas() {{ return {{}}; }},
+  circleMarker(latlng, opts) {{
+    const m = {{
+      latlng,
+      options: Object.assign({{}}, opts),
+      popup: '',
+      tooltip: '',
+      styleHistory: [],
+      bindTooltip(t) {{ this.tooltip = t; return this; }},
+      setTooltipContent(t) {{ this.tooltip = t; return this; }},
+      bindPopup(p) {{ this.popup = p; return this; }},
+      addTo(g) {{ g.addLayer(this); return this; }},
+      setStyle(s) {{ this.options = Object.assign(this.options, s); this.styleHistory.push(s); return this; }},
+    }};
+    createdMarkers.push(m);
+    return m;
+  }},
+}};
+
+{script_code}
+
+assert.strictEqual(typeof window.computeFreshness, 'function');
+assert.strictEqual(typeof window.updateFreshnessStatus, 'function');
+assert.strictEqual(typeof window.renderPopupHtml, 'function');
+assert.strictEqual(window.riskMarkers.length, {EXPECTED_LOCATIONS_COUNT});
+assert.ok(intervalCalls.includes(60000), 'Expected 60000ms freshness interval');
+
+const obsIso = {json.dumps(obs_end_str)};
+const obsMs = RealDate.parse(obsIso);
+
+// Exact 12.000000h -> FRESH
+fakeNowMs = obsMs + {MAX_DATA_LATENCY_HOURS} * 3600 * 1000;
+const exact12 = window.computeFreshness();
+assert.strictEqual(exact12.isStale, false);
+assert.strictEqual(exact12.statusStr, 'FRESH');
+
+// Exact 12.000001h -> STALE_DATA_UNASSESSED
+fakeNowMs = obsMs + {MAX_DATA_LATENCY_HOURS} * 3600 * 1000 + 4;
+const over12 = window.computeFreshness();
+assert.strictEqual(over12.isStale, true);
+assert.strictEqual(over12.statusStr, 'STALE_DATA_UNASSESSED');
+
+// Missing / invalid -> UNASSESSED_*
+window.setObservationEndTimeForTesting('');
+assert.strictEqual(window.computeFreshness().statusStr, 'UNASSESSED_MISSING_TIMESTAMP');
+assert.strictEqual(window.getIsStale(), true);
+window.setObservationEndTimeForTesting('invalid-ts');
+assert.strictEqual(window.computeFreshness().statusStr, 'UNASSESSED_INVALID_TIMESTAMP');
+assert.strictEqual(window.getIsStale(), true);
+
+// Future timestamp -> UNASSESSED_FUTURE_TIMESTAMP
+window.setObservationEndTimeForTesting(obsIso);
+fakeNowMs = obsMs - 60000;
+const futureRes = window.computeFreshness();
+assert.strictEqual(futureRes.isStale, true);
+assert.strictEqual(futureRes.statusStr, 'UNASSESSED_FUTURE_TIMESTAMP');
+
+// Verify updateFreshnessStatus transitions markers to stale #95a5a6 styling when aged past 12h
+fakeNowMs = obsMs + 13 * 3600 * 1000;
+window.updateFreshnessStatus();
+assert.strictEqual(window.getIsStale(), true);
+const allStaleStyled = window.riskMarkers.every(
+  item => item.marker.options.fillColor === '#95a5a6'
+);
+assert.ok(allStaleStyled, 'Expected all risk markers to take #95a5a6 stale fill when aged > 12h');
+
+// Verify fresh transition restores active styling & renders balanced vs unweighted popup labels
+fakeNowMs = obsMs + 6 * 3600 * 1000;
+window.updateFreshnessStatus();
+assert.strictEqual(window.getIsStale(), false);
+const sampleRec = window.riskMarkers[0].data;
+const popupHtml = window.renderPopupHtml(sampleRec);
+assert.ok(popupHtml.includes('Balanced Terrain Prob (Used in Risk)'), 'Missing Balanced label in popup');
+assert.ok(popupHtml.includes('Unweighted Terrain Prob (Comparison Only)'), 'Missing Unweighted label in popup');
+assert.ok(popupHtml.includes('Limited Western Ghats Pilot'), 'Missing limited pilot scope in WG popup');
+for (const wLbl of ['1-hour accumulation:', '3-hour accumulation:', '6-hour accumulation:', '12-hour accumulation:', '24-hour accumulation:']) {{
+  assert.ok(popupHtml.includes(wLbl), 'Missing preserved GPM window in WG popup: ' + wLbl);
+}}
+console.log('WG_NODE_JS_VERIFIED');
+"""
+        tmp_js = tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False, encoding="utf-8")
+        try:
+            tmp_js.write(node_harness)
+            tmp_js.close()
+            proc = subprocess.run(
+                ["node", tmp_js.name],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(
+                proc.returncode,
+                0,
+                msg=f"Node JS freshness harness failed:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}",
+            )
+            self.assertIn("WG_NODE_JS_VERIFIED", proc.stdout)
+        finally:
+            Path(tmp_js.name).unlink(missing_ok=True)
 
     def test_regional_workflows_and_stage6d_cryptographic_preservation(self):
         """Test 13: Verify regional workflow files match trusted Git baseline hashes and Stage 6D files exist."""

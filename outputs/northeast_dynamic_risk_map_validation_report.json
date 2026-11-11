@@ -1,0 +1,108 @@
+{
+  "status": "PASSED",
+  "stage": "Stage 7.5 \u2014 Northeast India Dynamic GIS Risk Map and GeoJSON Integration",
+  "generation_timestamp_utc": "2026-11-11T17:21:51Z",
+  "coverage_region": "Northeast India",
+  "dem_tiles_count": 33,
+  "tiles": [
+    "N22E088",
+    "N22E092",
+    "N23E088",
+    "N23E091",
+    "N23E092",
+    "N23E093",
+    "N23E094",
+    "N24E091",
+    "N24E092",
+    "N24E093",
+    "N24E094",
+    "N25E088",
+    "N25E089",
+    "N25E090",
+    "N25E091",
+    "N25E092",
+    "N25E093",
+    "N25E094",
+    "N26E088",
+    "N26E091",
+    "N26E093",
+    "N26E094",
+    "N26E095",
+    "N27E088",
+    "N27E091",
+    "N27E092",
+    "N27E093",
+    "N27E094",
+    "N27E095",
+    "N27E096",
+    "N28E094",
+    "N28E095",
+    "N28E096"
+  ],
+  "outputs": {
+    "html_map_path": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk_map\\northeast_india_dynamic_risk_map.html",
+    "html_map_size_bytes": 12398879,
+    "regions_geojson_path": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk_map\\northeast_india_dynamic_risk_regions.geojson",
+    "regions_geojson_size_bytes": 7065138,
+    "cells_geojson_path": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk_map\\northeast_india_5km_spatial_cells.geojson",
+    "cells_geojson_size_bytes": 20627855,
+    "point_geojson_path": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk_map\\northeast_india_dynamic_hazard_risk.geojson",
+    "map_metadata_path": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk_map\\northeast_dynamic_risk_map_metadata.json",
+    "synced_outputs": {
+      "northeast_india_dynamic_risk_map.html": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_dynamic_risk_map.html",
+      "northeast_india_dynamic_risk_regions.geojson": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_dynamic_risk_regions.geojson",
+      "northeast_india_5km_spatial_cells.geojson": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_5km_spatial_cells.geojson",
+      "northeast_india_dynamic_hazard_risk.geojson": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_dynamic_hazard_risk.geojson",
+      "northeast_dynamic_risk_map_metadata.json": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_dynamic_risk_map_metadata.json",
+      "northeast_dynamic_risk_map_validation_report.json": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_dynamic_risk_map_validation_report.json"
+    }
+  },
+  "polygon_summary": {
+    "dynamic_hazard_regions_count": 2978,
+    "terrain_regions_count": 3664,
+    "rainfall_regions_count": 239,
+    "cells_covered": 14550
+  },
+  "grid_layer": {
+    "total_locations": 14550,
+    "resolution": "5 km regular spatial grid",
+    "primary_screening_categories": {
+      "Low": 7275,
+      "Moderate": 4365,
+      "High": 2182,
+      "Very High": 728,
+      "UNASSESSED": 0
+    },
+    "relative_category_cutoffs": {
+      "P50": 25.463841666666667,
+      "P80": 38.381460000000004,
+      "P95": 46.644207916666666
+    }
+  },
+  "evaluation_layers": {
+    "historical_landslide_events_count": 441,
+    "provisional_background_samples_count": 477,
+    "separation_guarantee": "Historical events and background samples are rendered in dedicated layers, strictly separate from 5 km regular grid predictions."
+  },
+  "gpm_observation_metadata": {
+    "observation_start_utc": "2026-11-10T12:00:00Z",
+    "observation_end_utc": "2026-11-11T12:00:00Z",
+    "latency_hours": 5.344,
+    "freshness_status": "SUCCESS",
+    "is_24h_complete": true
+  },
+  "validation_checks": {
+    "record_count_retained_14550": true,
+    "all_33_tiles_present": true,
+    "unique_grid_ids": true,
+    "all_cells_in_regional_polygons": true,
+    "all_polygon_geometries_valid": true,
+    "coordinates_within_bounds": true,
+    "freshness_gate_passed": true,
+    "threshold_validation_passed": true,
+    "five_layers_constructed": true,
+    "runtime_60s_freshness_guard_injected": true,
+    "disclaimer_present": true
+  },
+  "disclaimer": "EXPERIMENTAL PROVISIONAL SCREENING ONLY \u00b7 NOT AN OFFICIAL WARNING OR CALIBRATED PROBABILITY"
+}

@@ -60,6 +60,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from backend.gis_refresh_utils import atomic_write_csv, atomic_write_json
+
 # Default file paths
 DEFAULT_INTEGRATED_CSV = (
     PROJECT_ROOT
@@ -566,9 +568,9 @@ def run_himalayas_dynamic_risk_pipeline(
         if col not in df_out.columns:
             raise ValueError(f"Missing mandatory terrain feature in output: {col}")
 
-    # 5. Save Outputs
+    # 5. Save Outputs Atomically
     output_dir.mkdir(parents=True, exist_ok=True)
-    df_out.to_csv(output_csv_path, index=False)
+    atomic_write_csv(df_out, output_csv_path)
     print(f"\n5. Successfully saved dynamic hazard risk dataset:")
     print(f"   - CSV: {output_csv_path.name}")
     print(f"   - Rows: {len(df_out):,}")
@@ -627,8 +629,7 @@ def run_himalayas_dynamic_risk_pipeline(
         "disclaimer": DISCLAIMER_TEXT,
     }
 
-    with open(metadata_json_path, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, indent=2)
+    atomic_write_json(metadata_json_path, metadata)
     print(f"   - Metadata JSON saved: {metadata_json_path.name}")
 
     val_report = {
@@ -653,8 +654,7 @@ def run_himalayas_dynamic_risk_pipeline(
         "disclaimer": DISCLAIMER_TEXT,
     }
 
-    with open(validation_report_path, "w", encoding="utf-8") as f:
-        json.dump(val_report, f, indent=2)
+    atomic_write_json(validation_report_path, val_report)
     print(f"   - Validation report saved: {validation_report_path.name}")
     print("=" * 75)
 

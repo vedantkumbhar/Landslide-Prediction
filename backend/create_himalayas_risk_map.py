@@ -60,6 +60,14 @@ from shapely.geometry import Polygon, MultiPolygon, mapping
 # =====================================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from backend.gis_refresh_utils import (
+    build_gpm_rainfall_rows_js,
+    dissolve_hazard_layer_into_regions as _shared_dissolve_regions,
+    export_cells_geojson as _shared_export_cells_geojson,
+)
 
 DEFAULT_INPUT_CSV = (
     PROJECT_ROOT
@@ -105,12 +113,6 @@ LON_BOUNDS = (73.0, 81.5)
 # Freshness limit contract (12.0 hours)
 MAX_DATA_LATENCY_HOURS = 12.0
 
-# Exact approved Stage 8.4 relative quantile cutoffs from refreshed metadata
-APPROVED_P50 = 13.493554166666666
-APPROVED_P80 = 30.560630000000007
-APPROVED_P95 = 41.140024687499995
-THRESHOLD_TOLERANCE = 1e-4
-
 # Approved color scheme for primary screening categories
 CATEGORY_COLORS: Dict[str, str] = {
     "Low": "#2ecc71",                         # Green
@@ -152,15 +154,14 @@ DISCLAIMER_TEXT = (
 
 def validate_stage84_metadata_thresholds(metadata: Dict[str, Any]) -> Dict[str, float]:
     """
-    Strictly validate Stage 8.4 relative category cutoffs in metadata.
-    Removes all silent fallbacks:
-    - Requires 'risk_formula_specification' dict.
-    - Requires 'relative_category_cutoffs' dict.
-    - Requires all three keys: 'P50_low_to_moderate', 'P80_moderate_to_high', 'P95_high_to_very_high'.
-    - Rejects missing, null, non-numeric, or non-finite values.
-    - Verifies values against approved Stage 8.4 thresholds within floating-point tolerance (1e-4).
-    - Verifies strict monotonicity: 0 < P50 < P80 < P95 < 100.
-    - Raises ValueError on any validation failure.
+    Validate the current Stage 8.4 relative category cutoffs from metadata.
+
+    Stage 8.4 recalculates these percentile thresholds whenever the rainfall
+    snapshot changes. They must therefore be read dynamically, not compared
+    against stale hardcoded values from an earlier run.
+
+    Requires all three finite numeric cutoffs and strict ordering:
+    0 < P50 < P80 < P95 < 100.
     """
     if not isinstance(metadata, dict):
         raise ValueError("Metadata must be a dictionary.")
@@ -173,26 +174,32 @@ def validate_stage84_metadata_thresholds(metadata: Dict[str, Any]) -> Dict[str, 
     if not isinstance(cutoffs, dict):
         raise ValueError("Metadata missing 'relative_category_cutoffs' dictionary.")
 
-    required_keys = [
-        ("P50_low_to_moderate", APPROVED_P50),
-        ("P80_moderate_to_high", APPROVED_P80),
-        ("P95_high_to_very_high", APPROVED_P95),
-    ]
+    required_keys = (
+        "P50_low_to_moderate",
+        "P80_moderate_to_high",
+        "P95_high_to_very_high",
+    )
 
     validated_cutoffs: Dict[str, float] = {}
-    for key, approved_val in required_keys:
+
+    for key in required_keys:
         if key not in cutoffs:
             raise ValueError(f"Missing required threshold key in metadata: '{key}'")
+
         raw_val = cutoffs[key]
-        if raw_val is None or isinstance(raw_val, bool) or not isinstance(raw_val, (int, float, np.floating)):
-            raise ValueError(f"Invalid or non-numeric threshold value for '{key}': {raw_val!r}")
+        if (
+            raw_val is None
+            or isinstance(raw_val, bool)
+            or not isinstance(raw_val, (int, float, np.integer, np.floating))
+        ):
+            raise ValueError(
+                f"Invalid or non-numeric threshold value for '{key}': {raw_val!r}"
+            )
+
         val = float(raw_val)
         if not math.isfinite(val):
             raise ValueError(f"Non-finite threshold value for '{key}': {val}")
-        if not math.isclose(val, approved_val, rel_tol=THRESHOLD_TOLERANCE, abs_tol=THRESHOLD_TOLERANCE):
-            raise ValueError(
-                f"Threshold mismatch for '{key}': got {val}, expected {approved_val} (within tolerance {THRESHOLD_TOLERANCE})"
-            )
+
         validated_cutoffs[key] = val
 
     p50 = validated_cutoffs["P50_low_to_moderate"]
@@ -201,15 +208,13 @@ def validate_stage84_metadata_thresholds(metadata: Dict[str, Any]) -> Dict[str, 
 
     if not (0.0 < p50 < p80 < p95 < 100.0):
         raise ValueError(
-            f"Thresholds violate strict monotonicity 0 < P50 ({p50}) < P80 ({p80}) < P95 ({p95}) < 100"
+            "Thresholds violate strict monotonicity: "
+            f"expected 0 < P50 < P80 < P95 < 100; "
+            f"received P50={p50}, P80={p80}, P95={p95}."
         )
 
     return validated_cutoffs
 
-
-# =====================================================================
-# FRESHNESS & COMPLETENESS AUDIT GATE
-# =====================================================================
 
 def verify_himalayas_map_freshness_gate(
     df: pd.DataFrame,
@@ -402,109 +407,19 @@ def dissolve_hazard_layer_into_regions(
     """
     Dissolve adjacent cells sharing identical screening categories into continuous
     geographical hazard polygons without bridging across disconnected footprints.
-    Calculates exact aggregate summary statistics for each region.
+    Calculates exact aggregate summary statistics (including 1h-24h rainfall) for each region.
     """
-    region_records: List[Dict[str, Any]] = []
-    total_matched_cells = 0
-    all_matched_grid_ids: List[str] = []
-
-    unique_cats = sorted(gdf_cells[group_col].dropna().unique())
-    reg_counter = 1
-
-    for cat in unique_cats:
-        cat_cells = gdf_cells[gdf_cells[group_col] == cat].copy()
-        if len(cat_cells) == 0:
-            continue
-
-        dissolved = cat_cells.dissolve()
-        exploded = dissolved.explode(index_parts=False).reset_index(drop=True)
-
-        rep_pts = cat_cells.geometry.representative_point()
-        tree = exploded.sindex
-        left_idx, right_idx = tree.query(rep_pts, predicate="within")
-
-        cat_cells["_reg_idx"] = right_idx
-
-        for r_i, poly in enumerate(exploded.geometry):
-            sub_cells = cat_cells[cat_cells["_reg_idx"] == r_i]
-            c_count = len(sub_cells)
-            if c_count == 0:
-                continue
-
-            total_matched_cells += c_count
-            gids = sub_cells["grid_id"].tolist()
-            all_matched_grid_ids.extend(gids)
-
-            if layer_name == "dynamic_hazard_screening":
-                pfx = "HIM_HAZARD_REG"
-            elif layer_name == "terrain_susceptibility":
-                pfx = "HIM_TERRAIN_REG"
-            else:
-                pfx = "HIM_RAIN_REG"
-
-            reg_id = f"{pfx}_{reg_counter:04d}"
-            reg_counter += 1
-
-            risk_min = round(float(sub_cells["dynamic_risk_index"].min()), 2) if "dynamic_risk_index" in sub_cells else None
-            risk_mean = round(float(sub_cells["dynamic_risk_index"].mean()), 2) if "dynamic_risk_index" in sub_cells else None
-            risk_max = round(float(sub_cells["dynamic_risk_index"].max()), 2) if "dynamic_risk_index" in sub_cells else None
-            tcontrib_mean = round(float(sub_cells["terrain_contribution"].mean()), 2) if "terrain_contribution" in sub_cells else None
-            rcontrib_mean = round(float(sub_cells["rainfall_contribution"].mean()), 2) if "rainfall_contribution" in sub_cells else None
-            tprob_mean = round(float(sub_cells["terrain_rf_prob_balanced"].mean()), 3) if "terrain_rf_prob_balanced" in sub_cells else None
-            r24_mean = round(float(sub_cells["gpm_24h_accumulation_mm"].mean()), 2) if "gpm_24h_accumulation_mm" in sub_cells else None
-            rindex_mean = round(float(sub_cells["rainfall_intensity_index"].mean()), 3) if "rainfall_intensity_index" in sub_cells else None
-
-            color = color_map.get(cat, "#95a5a6")
-            tiles = sorted(sub_cells["tile"].unique().tolist())
-
-            region_records.append({
-                "geometry": poly,
-                "region_id": reg_id,
-                "layer": layer_name,
-                group_col: cat,
-                "color": color,
-                "cell_count": c_count,
-                "area_sqkm": round(c_count * 25.0, 1),
-                "grid_ids": gids,
-                "dynamic_risk_min": risk_min,
-                "dynamic_risk_mean": risk_mean,
-                "dynamic_risk_max": risk_max,
-                "terrain_contrib_mean": tcontrib_mean,
-                "rainfall_contrib_mean": rcontrib_mean,
-                "terrain_rf_prob_mean": tprob_mean,
-                "gpm_24h_accumulation_mean_mm": r24_mean,
-                "rainfall_intensity_index_mean": rindex_mean,
-                "tiles_represented": tiles,
-                "observation_start_utc": obs_start_utc,
-                "observation_end_utc": obs_end_utc,
-                "freshness_status": "STALE_DATA_UNASSESSED" if is_stale else "FRESH",
-                "disclaimer": DISCLAIMER_TEXT,
-            })
-
-    gdf_regions = gpd.GeoDataFrame(region_records, crs="EPSG:4326")
-
-    # Strict validations
-    if total_matched_cells != len(gdf_cells):
-        raise ValueError(
-            f"Layer '{layer_name}' cell count mismatch: {total_matched_cells} matched, expected {len(gdf_cells)}"
-        )
-    if len(set(all_matched_grid_ids)) != len(gdf_cells):
-        raise ValueError(
-            f"Layer '{layer_name}' contains duplicate or missing grid IDs: {len(set(all_matched_grid_ids))} unique of {len(gdf_cells)}"
-        )
-    if not gdf_regions.geometry.is_valid.all():
-        raise ValueError(f"Layer '{layer_name}' contains invalid polygon geometries.")
-
-    meta = {
-        "layer_name": layer_name,
-        "group_column": group_col,
-        "total_regions": len(gdf_regions),
-        "total_cells_covered": total_matched_cells,
-        "all_geometries_valid": True,
-        "category_region_counts": {str(k): int(v) for k, v in gdf_regions[group_col].value_counts().items()},
-    }
-
-    return gdf_regions, meta
+    return _shared_dissolve_regions(
+        gdf_cells=gdf_cells,
+        group_col=group_col,
+        layer_name=layer_name,
+        color_map=color_map,
+        obs_start_utc=obs_start_utc,
+        obs_end_utc=obs_end_utc,
+        region_prefix="HIM",
+        disclaimer=DISCLAIMER_TEXT,
+        is_stale=is_stale,
+    )
 
 
 # =====================================================================
@@ -561,50 +476,13 @@ def export_himalayas_5km_spatial_cells_geojson(
     """
     Export all 12,052 individual 5 km spatial cell polygons as RFC 7946 GeoJSON.
     """
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    features: List[Dict[str, Any]] = []
-    cell_cols = [
-        "grid_id", "tile", "latitude", "longitude",
-        "elevation_m", "slope_degrees", "primary_screening_category",
-        "dynamic_risk_index", "terrain_contribution", "rainfall_contribution",
-        "terrain_rf_prob_balanced", "terrain_baseline_screening_tier",
-        "gpm_24h_accumulation_mm", "gpm_observation_end_utc"
-    ]
-    for _, r in gdf_cells.iterrows():
-        geom_mapping = shapely.geometry.mapping(r.geometry)
-        props: Dict[str, Any] = {}
-        for c in cell_cols:
-            if c in r:
-                v = r[c]
-                if pd.notna(v):
-                    props[c] = float(v) if isinstance(v, (float, np.floating)) else (int(v) if isinstance(v, (int, np.integer)) else str(v))
-                else:
-                    props[c] = None
-
-        features.append({
-            "type": "Feature",
-            "geometry": geom_mapping,
-            "properties": props,
-        })
-
-    geojson_doc = {
-        "type": "FeatureCollection",
-        "metadata": {
-            "title": "Himalayas 5km Spatial Prediction Grid Cell Polygons",
-            "region": "Himalayas",
-            "total_cells": len(features),
-            "grid_spacing_km": 5.0,
-            "crs": "urn:ogc:def:crs:OGC:1.3:CRS84",
-            "disclaimer": DISCLAIMER_TEXT,
-        },
-        "features": features,
-    }
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(geojson_doc, f, indent=2)
-
-    return output_path
+    return _shared_export_cells_geojson(
+        gdf_cells=gdf_cells,
+        output_path=output_path,
+        title="Himalayas 5km Spatial Prediction Grid Cell Polygons",
+        region="Himalayas",
+        disclaimer=DISCLAIMER_TEXT,
+    )
 
 
 def export_himalayas_dynamic_risk_geojson(
@@ -1048,6 +926,7 @@ def generate_himalayas_dynamic_risk_map(
     json_rain = json.dumps(rain_geojson_dict, separators=(",", ":"))
 
     # 9. Inject Client-Side Regional Polygon Rendering and Runtime Freshness Engine
+    shared_rain_rows_js = build_gpm_rainfall_rows_js()
     client_script = f"""
 <script>
 (function() {{
@@ -1099,6 +978,8 @@ def generate_himalayas_dynamic_risk_map(
         return suffix ? formatted + " " + suffix : formatted;
     }}
 
+{shared_rain_rows_js}
+
     function buildCompatArray(p) {{
         // Returns 25-element array compatible with legacy test inspect methods
         var gid = p.region_id || "REGION";
@@ -1110,14 +991,18 @@ def generate_himalayas_dynamic_risk_map(
         var color = p.color || "#2ecc71";
         var tprob = p.terrain_rf_prob_mean !== undefined ? p.terrain_rf_prob_mean : 0.5;
         var tcontrib = p.terrain_contrib_mean !== undefined ? p.terrain_contrib_mean : 25.0;
-        var rcontrib = p.rainfall_contrib_mean !== undefined ? p.rainfall_contrib_mean : 0.0;
-        var r24 = p.gpm_24h_accumulation_mean_mm !== undefined ? p.gpm_24h_accumulation_mean_mm : 0.0;
-        var rindex = p.rainfall_intensity_index_mean !== undefined ? p.rainfall_intensity_index_mean : 0.0;
+        var rcontrib = p.rainfall_contrib_mean !== undefined ? p.rainfall_contrib_mean : null;
+        var r1 = p.gpm_1h_accumulation_mean_mm !== undefined ? p.gpm_1h_accumulation_mean_mm : null;
+        var r3 = p.gpm_3h_accumulation_mean_mm !== undefined ? p.gpm_3h_accumulation_mean_mm : null;
+        var r6 = p.gpm_6h_accumulation_mean_mm !== undefined ? p.gpm_6h_accumulation_mean_mm : null;
+        var r12 = p.gpm_12h_accumulation_mean_mm !== undefined ? p.gpm_12h_accumulation_mean_mm : null;
+        var r24 = p.gpm_24h_accumulation_mean_mm !== undefined ? p.gpm_24h_accumulation_mean_mm : null;
+        var rindex = p.rainfall_intensity_index_mean !== undefined ? p.rainfall_intensity_index_mean : null;
         return [
             gid, tilesStr, lat, lon, 2500.0, 25.0,
             risk, cat, color, "Benchmark Tier",
             tprob, "Terrain Tier", tcontrib, rcontrib,
-            0.0, 0.0, 0.0, 0.0, r24, rindex, 0.0,
+            r1, r3, r6, r12, r24, rindex, 0.0,
             "VALIDATED_SCREENING_CALCULATED", color, color, color
         ];
     }}
@@ -1148,7 +1033,6 @@ def generate_himalayas_dynamic_risk_map(
         var tprobStr = isArray ? formatVal(propsOrData[10], null, 3) : formatVal(propsOrData.terrain_rf_prob_mean, null, 3);
         var rcontribStr = isStale ? '<span style="color:#95a5a6; font-style:italic;">Unassessed (Stale)</span>' :
             (isArray ? formatVal(propsOrData[13], null, 2) : formatVal(propsOrData.rainfall_contrib_mean, null, 2));
-        var r24Str = isArray ? formatVal(propsOrData[18], 'mm', 2) : formatVal(propsOrData.gpm_24h_accumulation_mean_mm, 'mm', 2);
         var statusStr = isStale ? "STALE_DATA_UNASSESSED" : (isArray ? escapeHtml(propsOrData[21]) : escapeHtml(propsOrData.freshness_status || "FRESH"));
 
         var latencyStr = (currentLatencyHours !== null && !isNaN(currentLatencyHours)) ? currentLatencyHours.toFixed(1) + "h latency" : "latency unavailable";
@@ -1171,8 +1055,8 @@ def generate_himalayas_dynamic_risk_map(
                 '<div style="display:flex; justify-content:space-between; font-size:11px; color:#555; margin-top:2px;"><span>Mean Rainfall Component:</span><span style="font-weight:bold;">' + rcontribStr + ' pts</span></div>' +
             '</div>' +
             '<div style="background:#f4f9fd; border:1px solid #d0e3f0; border-radius:6px; padding:7px 9px; margin-bottom:8px;">' +
-                '<div style="font-weight:bold; color:#1b4f72; margin-bottom:4px; font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">NASA GPM IMERG Rainfall Status</div>' +
-                '<div style="display:flex; justify-content:space-between; font-size:11px; color:#546e7a;"><span>Mean 24h Accumulation:</span><span style="font-weight:bold; color:#1b4f72;">' + r24Str + '</span></div>' +
+                '<div style="font-weight:bold; color:#1b4f72; margin-bottom:4px; font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">NASA GPM IMERG Rainfall (Early Run V07C)</div>' +
+                renderGpmRainfallRowsHtml(propsOrData) +
                 '<div style="font-size:10px; color:#78909c; margin-top:4px;">Obs End: <b>' + escapeHtml(obsEndUtc) + '</b> (' + latencyStr + ') | Status: <b>' + statusStr + '</b></div>' +
             '</div>' +
             '<div style="font-size:9.5px; color:#7f8c8d; line-height:1.3; background:#fff8e1; border:1px solid #ffe082; padding:5px 7px; border-radius:4px;">' +
@@ -1218,7 +1102,6 @@ def generate_himalayas_dynamic_risk_map(
         var areaKm2 = props.area_sqkm || 25.0;
         var tilesStr = Array.isArray(props.tiles_represented) ? escapeHtml(props.tiles_represented.join(", ")) : escapeHtml(props.tiles_represented);
         var rcontrib = isStale ? "Unassessed (Stale)" : formatVal(props.rainfall_contrib_mean, 'pts', 2);
-        var r24 = formatVal(props.gpm_24h_accumulation_mean_mm, 'mm', 2);
         var statusStr = isStale ? "STALE_DATA_UNASSESSED" : escapeHtml(props.freshness_status || "FRESH");
         var latencyStr = (currentLatencyHours !== null && !isNaN(currentLatencyHours)) ? currentLatencyHours.toFixed(1) + "h latency" : "latency unavailable";
 
@@ -1233,9 +1116,12 @@ def generate_himalayas_dynamic_risk_map(
             '<table style="width:100%; border-collapse:collapse; margin-bottom:8px; font-size:11px;">' +
                 '<tr><td style="color:#7f8c8d;">DEM Tiles Covered:</td><td style="font-weight:bold; text-align:right;">' + tilesStr + '</td></tr>' +
                 '<tr><td style="color:#7f8c8d;">Mean Rainfall Contribution:</td><td style="font-weight:bold; text-align:right; color:' + badgeColor + ';">' + rcontrib + '</td></tr>' +
-                '<tr><td style="color:#7f8c8d;">Mean 24h Accumulation:</td><td style="font-weight:bold; text-align:right; color:#1b4f72;">' + r24 + '</td></tr>' +
                 '<tr><td style="color:#7f8c8d;">Obs End / Status:</td><td style="font-weight:bold; text-align:right;">' + escapeHtml(obsEndUtc) + ' (' + statusStr + ')</td></tr>' +
             '</table>' +
+            '<div style="background:#f4f9fd; border:1px solid #d0e3f0; border-radius:6px; padding:7px 9px; margin-bottom:8px;">' +
+                '<div style="font-weight:bold; color:#1b4f72; margin-bottom:4px; font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">NASA GPM IMERG Rainfall (Early Run V07C)</div>' +
+                renderGpmRainfallRowsHtml(props) +
+            '</div>' +
             '<div style="font-size:9.5px; color:#7f8c8d; line-height:1.3; background:#ebf5fb; border:1px solid #aed6f1; padding:5px 7px; border-radius:4px;">' +
                 '<b>Notice:</b> Experimental rainfall contribution calculated from NASA GPM IMERG Early Run V07C accumulations. Latency: ' + latencyStr + '.' +
             '</div>' +
@@ -1421,6 +1307,8 @@ def generate_himalayas_dynamic_risk_map(
     if (typeof window !== 'undefined') {{
         window.computeFreshness = computeFreshness;
         window.updateFreshnessStatus = updateFreshnessStatus;
+        window.renderRiskPopupHtml = renderRiskPopupHtml;
+        window.renderRainPopupHtml = renderRainPopupHtml;
         window.renderPopupHtml = renderRiskPopupHtml;
         window.riskPolygons = riskPolygons;
         window.rainPolygons = rainPolygons;

@@ -59,6 +59,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from backend.gis_refresh_utils import (
+    atomic_write_csv,
+    atomic_write_json,
+    create_timestamped_backup,
+)
+
 # Default file paths
 DEFAULT_INTEGRATED_CSV = (
     PROJECT_ROOT
@@ -560,7 +566,12 @@ def run_northeast_dynamic_risk_pipeline(
 
     # 5. Save Outputs
     output_dir.mkdir(parents=True, exist_ok=True)
-    out_df.to_csv(output_csv_path, index=False)
+    if overwrite:
+        create_timestamped_backup(
+            [output_csv_path, metadata_json_path, validation_report_path],
+            output_dir / "backup",
+        )
+    atomic_write_csv(out_df, output_csv_path)
     print(f"\n5. Saved dynamic risk dataset:")
     print(f"   - File: {output_csv_path.name}")
     print(f"   - Size: {output_csv_path.stat().st_size:,} bytes")
@@ -614,8 +625,7 @@ def run_northeast_dynamic_risk_pipeline(
         "disclaimer": DISCLAIMER_TEXT,
     }
 
-    with open(metadata_json_path, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, indent=2)
+    atomic_write_json(metadata_json_path, metadata)
     print(f"   - Metadata saved: {metadata_json_path.name}")
 
     # Build Validation Report
@@ -646,8 +656,7 @@ def run_northeast_dynamic_risk_pipeline(
         "tile_distribution": out_df["tile"].value_counts().to_dict(),
     }
 
-    with open(validation_report_path, "w", encoding="utf-8") as f:
-        json.dump(validation_report, f, indent=2)
+    atomic_write_json(validation_report_path, validation_report)
     print(f"   - Validation report saved: {validation_report_path.name}")
     print("=" * 75)
 

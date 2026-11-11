@@ -26,6 +26,14 @@ import pandas as pd
 # =====================================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from backend.gis_refresh_utils import (
+    atomic_write_json,
+    create_timestamped_backup,
+    validate_dynamic_metadata_thresholds,
+)
 
 DEFAULT_INPUT_CSV = (
     PROJECT_ROOT
@@ -61,12 +69,6 @@ EXPECTED_BACKGROUND_SAMPLES_COUNT = 1400
 LAT_BOUNDS = (8.0, 22.0)
 LON_BOUNDS = (70.0, 80.0)
 
-# Exact approved Stage 6D relative quantile cutoffs
-APPROVED_P50 = 9.364049598402843
-APPROVED_P80 = 19.79328141262924
-APPROVED_P95 = 45.95278574197298
-THRESHOLD_TOLERANCE = 1e-6
-
 
 # =====================================================================
 # STRICT THRESHOLD VALIDATION GATE (NO SILENT FALLBACKS)
@@ -74,50 +76,10 @@ THRESHOLD_TOLERANCE = 1e-6
 
 def validate_stage6d_metadata_thresholds(metadata: Dict[str, Any]) -> Dict[str, float]:
     """
-    Strictly validate Stage 6D relative category cutoffs in metadata.
-    Removes all silent fallbacks:
-    - Requires 'risk_formula_specification' dict.
-    - Requires 'relative_category_cutoffs' dict.
-    - Requires all three keys: 'P50_low_to_moderate', 'P80_moderate_to_high', 'P95_high_to_very_high'.
-    - Rejects missing, null, non-numeric, or non-finite values.
-    - Verifies values against approved Stage 6D thresholds within strict floating-point tolerance (1e-6).
-    - Raises ValueError on any validation failure.
-    - Never silently substitutes hard-coded defaults.
+    Strictly validate Stage 6D relative category cutoffs dynamically from metadata.
+    Never rejects fresh runs against stale hardcoded cutoffs.
     """
-    if not isinstance(metadata, dict):
-        raise ValueError("Metadata must be a dictionary.")
-
-    risk_spec = metadata.get("risk_formula_specification")
-    if not isinstance(risk_spec, dict):
-        raise ValueError("Metadata missing 'risk_formula_specification' dictionary.")
-
-    cutoffs = risk_spec.get("relative_category_cutoffs")
-    if not isinstance(cutoffs, dict):
-        raise ValueError("Metadata missing 'relative_category_cutoffs' dictionary.")
-
-    required_keys = [
-        ("P50_low_to_moderate", APPROVED_P50),
-        ("P80_moderate_to_high", APPROVED_P80),
-        ("P95_high_to_very_high", APPROVED_P95),
-    ]
-
-    validated_cutoffs: Dict[str, float] = {}
-    for key, approved_val in required_keys:
-        if key not in cutoffs:
-            raise ValueError(f"Missing required threshold key in metadata: '{key}'")
-        raw_val = cutoffs[key]
-        if raw_val is None or isinstance(raw_val, bool) or not isinstance(raw_val, (int, float, np.floating)):
-            raise ValueError(f"Invalid or non-numeric threshold value for '{key}': {raw_val!r}")
-        val = float(raw_val)
-        if not math.isfinite(val):
-            raise ValueError(f"Non-finite threshold value for '{key}': {val}")
-        if not math.isclose(val, approved_val, rel_tol=THRESHOLD_TOLERANCE, abs_tol=THRESHOLD_TOLERANCE):
-            raise ValueError(
-                f"Threshold mismatch for '{key}': got {val}, expected {approved_val} (within tolerance {THRESHOLD_TOLERANCE})"
-            )
-        validated_cutoffs[key] = val
-
-    return validated_cutoffs
+    return validate_dynamic_metadata_thresholds(metadata)
 
 
 # =====================================================================
@@ -200,12 +162,14 @@ def export_western_ghats_dynamic_risk_geojson(
     if not input_csv_path.exists():
         raise FileNotFoundError(f"Input Stage 6D CSV not found: {input_csv_path}")
 
-    # Overwrite protection gate
-    if output_geojson_path.exists() and not overwrite:
-        raise FileExistsError(
-            f"Output GeoJSON already exists: {output_geojson_path}. "
-            "Use --overwrite to explicitly replace existing file."
-        )
+    # Overwrite & Backup protection gate
+    if output_geojson_path.exists():
+        if not overwrite:
+            raise FileExistsError(
+                f"Output GeoJSON already exists: {output_geojson_path}. "
+                "Use --overwrite to explicitly replace existing file."
+            )
+        create_timestamped_backup([output_geojson_path], output_geojson_path.parent / "backup")
 
     # 1. Load input dataset
     print(f"\n1. Loading Stage 6D risk dataset: {input_csv_path.name}")
@@ -376,9 +340,12 @@ def export_western_ghats_dynamic_risk_geojson(
     geojson_doc: Dict[str, Any] = {
         "type": "FeatureCollection",
         "metadata": {
-            "title": "Western Ghats Dynamic Landslide Hazard Risk",
+            "title": "Western Ghats Limited Pilot Dynamic Landslide Hazard Risk",
             "stage": "Stage 6E Deliverable",
-            "coverage_region": "Western Ghats, India",
+            "coverage_region": "Western Ghats, India (Limited Pilot — 14 Validated DEM Tiles Only)",
+            "coverage_scope": "LIMITED_PILOT",
+            "complete_region_coverage": False,
+            "coverage_note": "Limited Western Ghats pilot: 14 validated DEM tiles, 1,582 locations (182 historical events + 1,400 background samples). Does not imply complete Western Ghats coverage; no duplicated historical records.",
             "total_locations": len(features),
             "historical_events_count": hist_event_count,
             "provisional_background_count": bg_sample_count,
@@ -399,10 +366,8 @@ def export_western_ghats_dynamic_risk_geojson(
         "features": features,
     }
 
-    # 5. Save GeoJSON
-    output_geojson_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_geojson_path, "w", encoding="utf-8") as f:
-        json.dump(geojson_doc, f, indent=2)
+    # 5. Save GeoJSON Atomically
+    atomic_write_json(output_geojson_path, geojson_doc)
 
     print(f"\n3. Successfully exported GeoJSON: {output_geojson_path.name}")
     print(f"   - File size: {output_geojson_path.stat().st_size:,} bytes")

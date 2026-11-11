@@ -51,6 +51,11 @@ import numpy as np
 import pandas as pd
 import requests
 
+from backend.gis_refresh_utils import (
+    atomic_write_json,
+    create_timestamped_backup,
+)
+
 # Reuse core integration engine from Stage 6A
 from backend.extract_western_ghats_gpm_rainfall import (
     WesternGhatsGPMIntegrator,
@@ -202,6 +207,7 @@ class GPMGranuleDownloader:
         self.token = token or EARTHDATA_TOKEN
         self.archive_dir = archive_dir
         self.archive_dir.mkdir(parents=True, exist_ok=True)
+        self.last_discovered_cmr_count = 0
         self.session = requests.Session()
         adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=10)
         self.session.mount("https://", adapter)
@@ -312,8 +318,10 @@ class GPMGranuleDownloader:
                 }
 
         if not granule_map:
+            self.last_discovered_cmr_count = 0
             return None, None, []
 
+        self.last_discovered_cmr_count = len(granule_map)
         available_starts = sorted(granule_map.keys())
 
         # Search from the newest start downwards for a contiguous 48-granule block
@@ -670,10 +678,13 @@ class WesternGhatsDynamicRefreshEngine:
         # Handle incomplete window: fail safely without generating false zeros
         if status == "INCOMPLETE_DATA":
             meta_path = self.metadata_dir / f"refresh_metadata_{target_end_time.strftime('%Y%m%dT%H%M%SZ')}.json"
-            with open(meta_path, "w") as f:
-                json.dump(metadata, f, indent=2)
-            with open(self.latest_status_json, "w") as f:
-                json.dump(metadata, f, indent=2)
+            atomic_write_json(meta_path, metadata)
+            create_timestamped_backup(
+                [self.latest_status_json],
+                self.metadata_dir / "backup",
+                run_ts=execution_start_utc.strftime("%Y%m%d_%H%M%S"),
+            )
+            atomic_write_json(self.latest_status_json, metadata)
 
             print(f"\nWARNING: Incomplete 24-hour GPM window ({len(granules)}/48 granules).")
             print(f"Never interpreting missing measurements as zero rainfall. Refresh halted safely.")
@@ -709,6 +720,11 @@ class WesternGhatsDynamicRefreshEngine:
 
         # 7. Promotion to latest validated copy (ONLY if status == SUCCESS)
         if status == "SUCCESS":
+            create_timestamped_backup(
+                [self.latest_validated_csv],
+                self.output_dir / "backup",
+                run_ts=execution_start_utc.strftime("%Y%m%d_%H%M%S"),
+            )
             staging_latest = self.output_dir / f"{run_id}_latest.tmp.csv"
             feature_df.to_csv(staging_latest, index=False)
             os.replace(staging_latest, self.latest_validated_csv)
@@ -725,6 +741,8 @@ class WesternGhatsDynamicRefreshEngine:
         unique_pixels = int(len(set(zip(feature_df["gpm_grid_latitude"], feature_df["gpm_grid_longitude"]))))
 
         metadata.update({
+            "granules_discovered_cmr": getattr(self.downloader, "last_discovered_cmr_count", 0),
+            "source_granules": [g["filename"] for g in granules],
             "snapshot_path": str(snapshot_path),
             "snapshot_preserved_existing": snapshot_preserved,
             "latest_validated_path": str(self.latest_validated_csv) if status == "SUCCESS" else None,
@@ -751,10 +769,13 @@ class WesternGhatsDynamicRefreshEngine:
         })
 
         meta_path = self.metadata_dir / f"refresh_metadata_{target_end_time.strftime('%Y%m%dT%H%M%SZ')}.json"
-        with open(meta_path, "w") as f:
-            json.dump(metadata, f, indent=2)
-        with open(self.latest_status_json, "w") as f:
-            json.dump(metadata, f, indent=2)
+        atomic_write_json(meta_path, metadata)
+        create_timestamped_backup(
+            [self.latest_status_json],
+            self.metadata_dir / "backup",
+            run_ts=execution_start_utc.strftime("%Y%m%d_%H%M%S"),
+        )
+        atomic_write_json(self.latest_status_json, metadata)
 
         print(f"Recorded refresh metadata to:")
         print(f"  {meta_path.name}")
