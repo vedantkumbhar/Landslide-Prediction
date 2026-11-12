@@ -76,6 +76,7 @@ var _mapInstances = [];
 var _tileLayers = [];
 var _featureGroups = [];
 var _layerControls = [];
+var _svgRenderers = [];
 
 function makeFeatureGroup() {{
     var fg = {{
@@ -94,20 +95,38 @@ function makeFeatureGroup() {{
     return fg;
 }}
 
-function makeVectorLayer(feat, latlngs) {{
+function makeVectorLayer(feat, latlngs, opts) {{
     return {{
         feature: feat || null,
         latlngs: latlngs || null,
+        options: opts || {{}},
         style: {{}},
         tooltip: null,
         popupFn: null,
+        popupOpts: null,
+        popupOpenCount: 0,
         addedToGroup: null,
         events: {{}},
         setStyle: function(s) {{ Object.assign(this.style, s); }},
         bindTooltip: function(t) {{ this.tooltip = t; }},
         setTooltipContent: function(t) {{ this.tooltip = t; }},
-        bindPopup: function(p) {{ this.popupFn = p; }},
+        bindPopup: function(p, pOpts) {{ this.popupFn = p; this.popupOpts = pOpts || {{}}; }},
         on: function(ev, fn) {{ this.events[ev] = fn; }},
+        triggerEvent: function(ev) {{
+            if (typeof this.events[ev] === 'function') {{
+                this.events[ev]({{ target: this }});
+            }}
+            if (ev === 'click' && this.popupFn) {{
+                var html = (typeof this.popupFn === 'function') ? this.popupFn() : this.popupFn;
+                this.popupOpenCount += 1;
+                if (_mapInstances.length) {{
+                    _mapInstances[0].activePopup = {{ source: this, html: html }};
+                    _mapInstances[0].popupHistory.push({{ source: this, html: html }});
+                }}
+                return html;
+            }}
+            return null;
+        }},
         addTo: function(fg) {{
             this.addedToGroup = fg;
             if (fg && typeof fg.addLayer === 'function') fg.addLayer(this);
@@ -118,6 +137,11 @@ function makeVectorLayer(feat, latlngs) {{
 
 global.L = {{
     CRS: {{ EPSG3857: 'EPSG:3857' }},
+    svg: function(opts) {{
+        var r = {{ type: 'svg', opts: opts || {{}} }};
+        _svgRenderers.push(r);
+        return r;
+    }},
     map: function(id, opts) {{
         var m = {{
             id: id,
@@ -125,6 +149,8 @@ global.L = {{
             layers: [],
             fitBoundsCalls: [],
             overlayListeners: [],
+            activePopup: null,
+            popupHistory: [],
             addLayer: function(l) {{ if (this.layers.indexOf(l) === -1) this.layers.push(l); return this; }},
             hasLayer: function(l) {{ return this.layers.indexOf(l) !== -1; }},
             fitBounds: function(b, optsB) {{ this.fitBoundsCalls.push({{ bounds: b, opts: optsB }}); return this; }},
@@ -190,12 +216,12 @@ global.L = {{
         }};
     }},
     polygon: function(latlngs, opts) {{
-        var lyr = makeVectorLayer(null, latlngs);
+        var lyr = makeVectorLayer(null, latlngs, opts);
         lyr.setStyle(opts || {{}});
         return lyr;
     }},
     circleMarker: function(latlng, opts) {{
-        var lyr = makeVectorLayer(null, [latlng]);
+        var lyr = makeVectorLayer(null, [latlng], opts);
         lyr.latlng = latlng;
         lyr.setStyle(opts || {{}});
         return lyr;
@@ -550,6 +576,140 @@ console.log(JSON.stringify(__output));
             minx, miny, maxx, maxy = geom.bounds
             self.assertTrue(LON_BOUNDS[0] - 0.5 <= minx <= maxx <= LON_BOUNDS[1] + 0.5)
             self.assertTrue(LAT_BOUNDS[0] - 0.5 <= miny <= maxy <= LAT_BOUNDS[1] + 0.5)
+
+    def test_11_marker_and_polygon_interaction_hover_and_popups(self) -> None:
+        html_text = DEFAULT_OUTPUT_HTML.read_text(encoding="utf-8")
+        self.assertNotIn("attachHoverHighlight", html_text)
+
+        res = self._execute_node_test(
+            """
+            var mapObj = _mapInstances[0];
+            var riskLyr = window.riskPolygons[0].layer;
+            var terLyr = window.terrainPolygons[0].layer;
+            var rainLyr = window.rainPolygons[0].layer;
+            var evLyr = window.eventMarkers[0].layer;
+            var bgLyr = window.bgMarkers[0].layer;
+
+            var initialRiskStyle = Object.assign({}, riskLyr.style);
+            var initialTerStyle = Object.assign({}, terLyr.style);
+            var initialRainStyle = Object.assign({}, rainLyr.style);
+
+            // Hover polygons and markers: must not apply dark outline or opacity boost
+            riskLyr.triggerEvent('mouseover');
+            var riskAfterHover = Object.assign({}, riskLyr.style);
+            riskLyr.triggerEvent('mouseout');
+
+            terLyr.triggerEvent('mouseover');
+            var terAfterHover = Object.assign({}, terLyr.style);
+
+            rainLyr.triggerEvent('mouseover');
+            var rainAfterHover = Object.assign({}, rainLyr.style);
+
+            evLyr.triggerEvent('mouseover');
+            var riskAfterMarkerHover = Object.assign({}, riskLyr.style);
+
+            // Click historical event marker -> opens ONLY historical event popup
+            var evPopupHtml = evLyr.triggerEvent('click');
+            var evPopupSourceOk = (mapObj.activePopup && mapObj.activePopup.source === evLyr);
+            var riskOpensOnEvClick = riskLyr.popupOpenCount;
+
+            // Moving cursor over surrounding polygon while marker popup stays open keeps style and popup intact
+            riskLyr.triggerEvent('mouseover');
+            var riskStyleDuringEvPopup = Object.assign({}, riskLyr.style);
+            var evPopupStillActive = (mapObj.activePopup && mapObj.activePopup.source === evLyr);
+
+            // Click background marker -> opens ONLY background sample popup
+            var bgPopupHtml = bgLyr.triggerEvent('click');
+            var bgPopupSourceOk = (mapObj.activePopup && mapObj.activePopup.source === bgLyr);
+
+            // Click risk polygon -> opens ONLY risk polygon popup
+            var riskPopupHtml = riskLyr.triggerEvent('click');
+            var riskPopupSourceOk = (mapObj.activePopup && mapObj.activePopup.source === riskLyr);
+
+            // Click terrain & rainfall polygons -> open their respective popups
+            var terPopupHtml = terLyr.triggerEvent('click');
+            var rainPopupHtml = rainLyr.triggerEvent('click');
+
+            return {
+                preferCanvas: !!mapObj.opts.preferCanvas,
+                svgRenderersCount: _svgRenderers.length,
+                svgRendererPane: _svgRenderers.length ? _svgRenderers[0].opts.pane : null,
+                eventCount: window.eventMarkers.length,
+                bgCount: window.bgMarkers.length,
+                allEventsOnMarkerPane: window.eventMarkers.every(function(item) {
+                    return item.layer.options.pane === 'markerPane' &&
+                        item.layer.options.renderer &&
+                        item.layer.options.renderer.opts.pane === 'markerPane';
+                }),
+                allBgOnMarkerPane: window.bgMarkers.every(function(item) {
+                    return item.layer.options.pane === 'markerPane' &&
+                        item.layer.options.renderer &&
+                        item.layer.options.renderer.opts.pane === 'markerPane';
+                }),
+                hasAnyPolygonHoverListener: window.riskPolygons.concat(window.terrainPolygons, window.rainPolygons).some(function(item) {
+                    return !!(item.layer.events.mouseover || item.layer.events.mouseout);
+                }),
+                initialRiskStyle: initialRiskStyle,
+                riskAfterHover: riskAfterHover,
+                riskAfterMarkerHover: riskAfterMarkerHover,
+                riskStyleDuringEvPopup: riskStyleDuringEvPopup,
+                initialTerStyle: initialTerStyle,
+                terAfterHover: terAfterHover,
+                initialRainStyle: initialRainStyle,
+                rainAfterHover: rainAfterHover,
+                evPopupHtml: evPopupHtml,
+                evPopupSourceOk: evPopupSourceOk,
+                evPopupStillActive: evPopupStillActive,
+                riskOpensOnEvClick: riskOpensOnEvClick,
+                bgPopupHtml: bgPopupHtml,
+                bgPopupSourceOk: bgPopupSourceOk,
+                riskPopupHtml: riskPopupHtml,
+                riskPopupSourceOk: riskPopupSourceOk,
+                terPopupHtml: terPopupHtml,
+                rainPopupHtml: rainPopupHtml,
+                popupHistoryLen: mapObj.popupHistory.length
+            };
+            """
+        )
+
+        self.assertTrue(res["preferCanvas"])
+        self.assertEqual(res["svgRenderersCount"], 1)
+        self.assertEqual(res["svgRendererPane"], "markerPane")
+        self.assertEqual(res["eventCount"], EXPECTED_HISTORICAL_EVENTS_COUNT)
+        self.assertEqual(res["bgCount"], EXPECTED_BACKGROUND_SAMPLES_COUNT)
+        self.assertTrue(res["allEventsOnMarkerPane"])
+        self.assertTrue(res["allBgOnMarkerPane"])
+        self.assertFalse(res["hasAnyPolygonHoverListener"])
+
+        self.assertEqual(res["riskAfterHover"], res["initialRiskStyle"])
+        self.assertEqual(res["riskAfterMarkerHover"], res["initialRiskStyle"])
+        self.assertEqual(res["riskStyleDuringEvPopup"], res["initialRiskStyle"])
+        self.assertEqual(res["terAfterHover"], res["initialTerStyle"])
+        self.assertEqual(res["rainAfterHover"], res["initialRainStyle"])
+
+        self.assertTrue(res["evPopupSourceOk"])
+        self.assertTrue(res["evPopupStillActive"])
+        self.assertEqual(res["riskOpensOnEvClick"], 0)
+        self.assertIn("Historical Landslide Event #", res["evPopupHtml"])
+        self.assertNotIn("Dynamic Risk Index", res["evPopupHtml"])
+        self.assertNotIn("Background Sample", res["evPopupHtml"])
+
+        self.assertTrue(res["bgPopupSourceOk"])
+        self.assertIn("Background Sample", res["bgPopupHtml"])
+        self.assertNotIn("Historical Landslide Event #", res["bgPopupHtml"])
+        self.assertNotIn("Dynamic Risk Index", res["bgPopupHtml"])
+
+        self.assertTrue(res["riskPopupSourceOk"])
+        self.assertIn("Dynamic Risk Index", res["riskPopupHtml"])
+        self.assertIn("Limited Pilot Notice", res["riskPopupHtml"])
+        for w in ("1h", "3h", "6h", "12h", "24h"):
+            self.assertIn(f"Mean {w} Accumulation:", res["riskPopupHtml"])
+        self.assertNotIn("Historical Landslide Event #", res["riskPopupHtml"])
+        self.assertNotIn("Background Sample", res["riskPopupHtml"])
+
+        self.assertIn("Physical Susceptibility Baseline", res["terPopupHtml"])
+        self.assertIn("NASA GPM Rainfall Impact", res["rainPopupHtml"])
+        self.assertEqual(res["popupHistoryLen"], 5)
 
 
 if __name__ == "__main__":

@@ -546,6 +546,8 @@ def _build_client_script(
     var terrainPolygons = [];
     var rainPolygons = [];
     var cellPolygons = [];
+    var eventMarkers = [];
+    var bgMarkers = [];
     var pilotBadgeHtml = '<span style="background:#eef4fb; color:#1b4f72; border:1px solid #b8d4f0; padding:2px 6px; border-radius:4px; font-size:10px; font-weight:bold;">Limited Pilot · 14 DEM Tiles Only</span>';
 
     {freshness_js}
@@ -780,17 +782,6 @@ def _build_client_script(
         }}
     }}
 
-    function attachHoverHighlight(layer, baseStyleFn) {{
-        if (typeof layer.on === 'function') {{
-            layer.on('mouseover', function() {{
-                layer.setStyle({{ weight: 2.0, color: '#1a252f', fillOpacity: 0.88 }});
-            }});
-            layer.on('mouseout', function() {{
-                layer.setStyle(baseStyleFn());
-            }});
-        }}
-    }}
-
     function populateLayers() {{
         lgRisk = (typeof {fg_risk_name} !== 'undefined') ? {fg_risk_name} : null;
         lgTerrain = (typeof {fg_terrain_name} !== 'undefined') ? {fg_terrain_name} : null;
@@ -810,10 +801,6 @@ def _build_client_script(
                         var p = feat.properties;
                         layer.bindTooltip(p.region_id + ': ' + p.primary_screening_category + ' Risk (' + p.cell_count + ' cells)');
                         layer.bindPopup(function() {{ return renderRiskPopupHtml(p); }}, {{ maxWidth: 370 }});
-                        attachHoverHighlight(layer, function() {{
-                            var c = isStale ? '#95a5a6' : (p.color || '#2ecc71');
-                            return {{ color: c, opacity: 0.90, weight: 0.9, fillColor: c, fillOpacity: 0.72 }};
-                        }});
                         riskPolygons.push({{ layer: layer, props: p }});
                     }}
                 }}).addTo(lgRisk);
@@ -829,10 +816,6 @@ def _build_client_script(
                         var p = feat.properties;
                         layer.bindTooltip(p.region_id + ': ' + p.terrain_baseline_screening_tier + ' Terrain (' + p.cell_count + ' cells)');
                         layer.bindPopup(function() {{ return renderTerrainPopupHtml(p); }}, {{ maxWidth: 350 }});
-                        attachHoverHighlight(layer, function() {{
-                            var c = p.color || '#2ecc71';
-                            return {{ color: c, opacity: 0.85, weight: 0.8, fillColor: c, fillOpacity: 0.70 }};
-                        }});
                         terrainPolygons.push({{ layer: layer, props: p }});
                     }}
                 }}).addTo(lgTerrain);
@@ -848,10 +831,6 @@ def _build_client_script(
                         var p = feat.properties;
                         layer.bindTooltip(p.region_id + ': ' + p.rain_tier + ' (' + p.cell_count + ' cells)');
                         layer.bindPopup(function() {{ return renderRainPopupHtml(p); }}, {{ maxWidth: 355 }});
-                        attachHoverHighlight(layer, function() {{
-                            var c = isStale ? '#95a5a6' : (p.color || '#3498db');
-                            return {{ color: c, opacity: 0.85, weight: 0.8, fillColor: c, fillOpacity: 0.68 }};
-                        }});
                         rainPolygons.push({{ layer: layer, props: p }});
                     }}
                 }}).addTo(lgRain);
@@ -877,43 +856,68 @@ def _build_client_script(
             }}
         }}
 
-        if (typeof L !== 'undefined' && typeof L.circleMarker === 'function') {{
-            if (lgEvents) {{
-                for (var e = 0; e < eventsRows.length; e++) {{
-                    (function(row) {{
-                        var m = L.circleMarker([row[0], row[1]], {{
-                            radius: 4.5, color: '#ffffff', weight: 1, fillColor: '#8e44ad', fillOpacity: 0.9
-                        }});
-                        m.bindTooltip('Historical Event #' + row[2] + ' (' + row[3] + ')');
-                        m.bindPopup(function() {{ return renderEventPopupHtml(row); }}, {{ maxWidth: 310 }});
-                        m.addTo(lgEvents);
-                    }})(eventsRows[e]);
-                }}
-            }}
-            if (lgBg) {{
-                for (var b = 0; b < bgRows.length; b++) {{
-                    (function(row) {{
-                        var m = L.circleMarker([row[0], row[1]], {{
-                            radius: 3.0, color: '#0e6251', weight: 0.6, fillColor: '#16a085', fillOpacity: 0.65
-                        }});
-                        m.bindTooltip('Background Sample ' + row[2]);
-                        m.bindPopup(function() {{ return renderBackgroundPopupHtml(row); }}, {{ maxWidth: 310 }});
-                        m.addTo(lgBg);
-                    }})(bgRows[b]);
-                }}
+        // Render point markers on Leaflet's dedicated markerPane (above overlayPane polygons)
+        // with an SVG renderer so interactive circles stay clickable while empty gaps pass through.
+        var markerRenderer = (typeof L !== 'undefined' && typeof L.svg === 'function')
+            ? L.svg({{ pane: 'markerPane' }})
+            : null;
+
+        function populatePointGroup(group, rows, baseOpts, tooltipFn, popupFn, storeArr) {{
+            if (!group) return;
+            for (var idx = 0; idx < rows.length; idx++) {{
+                (function(row) {{
+                    var opts = {{
+                        radius: baseOpts.radius,
+                        color: baseOpts.color,
+                        weight: baseOpts.weight,
+                        fillColor: baseOpts.fillColor,
+                        fillOpacity: baseOpts.fillOpacity,
+                        pane: 'markerPane'
+                    }};
+                    if (markerRenderer) {{
+                        opts.renderer = markerRenderer;
+                    }}
+                    var m = L.circleMarker([row[0], row[1]], opts);
+                    m.bindTooltip(tooltipFn(row));
+                    m.bindPopup(function() {{ return popupFn(row); }}, {{ maxWidth: 310 }});
+                    m.addTo(group);
+                    storeArr.push({{ layer: m, row: row }});
+                }})(rows[idx]);
             }}
         }}
 
+        if (typeof L !== 'undefined' && typeof L.circleMarker === 'function') {{
+            populatePointGroup(
+                lgEvents,
+                eventsRows,
+                {{ radius: 4.5, color: '#ffffff', weight: 1, fillColor: '#8e44ad', fillOpacity: 0.9 }},
+                function(row) {{ return 'Historical Event #' + row[2] + ' (' + row[3] + ')'; }},
+                renderEventPopupHtml,
+                eventMarkers
+            );
+            populatePointGroup(
+                lgBg,
+                bgRows,
+                {{ radius: 3.0, color: '#0e6251', weight: 0.6, fillColor: '#16a085', fillOpacity: 0.65 }},
+                function(row) {{ return 'Background Sample ' + row[2]; }},
+                renderBackgroundPopupHtml,
+                bgMarkers
+            );
+        }}
+
         var mapInstance = (typeof {map_name} !== 'undefined') ? {map_name} : null;
+        function bringPointLayersToFront() {{
+            if (!mapInstance) return;
+            if (lgBg && mapInstance.hasLayer(lgBg) && typeof lgBg.bringToFront === 'function') {{
+                lgBg.bringToFront();
+            }}
+            if (lgEvents && mapInstance.hasLayer(lgEvents) && typeof lgEvents.bringToFront === 'function') {{
+                lgEvents.bringToFront();
+            }}
+        }}
+        bringPointLayersToFront();
         if (mapInstance && typeof mapInstance.on === 'function') {{
-            mapInstance.on('overlayadd', function() {{
-                if (lgEvents && mapInstance.hasLayer(lgEvents) && typeof lgEvents.bringToFront === 'function') {{
-                    lgEvents.bringToFront();
-                }}
-                if (lgBg && mapInstance.hasLayer(lgBg) && typeof lgBg.bringToFront === 'function') {{
-                    lgBg.bringToFront();
-                }}
-            }});
+            mapInstance.on('overlayadd', bringPointLayersToFront);
         }}
     }}
 
@@ -923,12 +927,16 @@ def _build_client_script(
         window.renderRiskPopupHtml = renderRiskPopupHtml;
         window.renderRainPopupHtml = renderRainPopupHtml;
         window.renderTerrainPopupHtml = renderTerrainPopupHtml;
+        window.renderEventPopupHtml = renderEventPopupHtml;
+        window.renderBackgroundPopupHtml = renderBackgroundPopupHtml;
         window.renderCellPopupHtml = renderCellPopupHtml;
         window.renderPopupHtml = renderRiskPopupHtml;
         window.riskPolygons = riskPolygons;
         window.rainPolygons = rainPolygons;
         window.terrainPolygons = terrainPolygons;
         window.cellPolygons = cellPolygons;
+        window.eventMarkers = eventMarkers;
+        window.bgMarkers = bgMarkers;
         window.getIsStale = function() {{ return isStale; }};
         window.getCurrentLatencyHours = function() {{ return currentLatencyHours; }};
         window.setObservationEndTimeForTesting = function(newUtcStr) {{

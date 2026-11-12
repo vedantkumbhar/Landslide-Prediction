@@ -42,6 +42,13 @@ from backend.gis_refresh_utils import (
     resolve_gpm_window_with_telemetry,
     validate_dynamic_metadata_thresholds,
 )
+from backend.refresh_safety import (
+    DEFAULT_LOCK_FILENAME,
+    RefreshProcessLock,
+    RegionTransaction,
+    record_skipped_execution,
+    recover_interrupted_transactions,
+)
 from backend.integrate_himalayas_gpm_rainfall import (
     DEFAULT_ARCHIVE_DIR as GPM_ARCHIVE_DIR,
     DEFAULT_GRID_CSV as HIM_GRID_CSV,
@@ -320,63 +327,8 @@ def _build_region_specs() -> Dict[str, Dict[str, Any]]:
     }
 
 
-class RegionTransaction:
-    """
-    Transactional backup and rollback guard for a region's mutable outputs.
-
-    Captures pre-run snapshots of all tracked output files before modifying any
-    disk artifact. If an exception escapes the transaction block, restores every
-    pre-existing file atomically and removes any newly created partial artifacts.
-    """
-
-    def __init__(self, region_key: str, tracked_paths: Sequence[Path], backup_root: Path):
-        self.region_key = region_key
-        self.tracked_paths = list(dict.fromkeys(tracked_paths))
-        self.backup_root = backup_root
-        self._manifest: List[Tuple[Path, Optional[Path]]] = []
-        self.rolled_back = False
-
-    def __enter__(self) -> "RegionTransaction":
-        self.backup_root.mkdir(parents=True, exist_ok=True)
-        for idx, target in enumerate(self.tracked_paths):
-            if target.exists():
-                snapshot = self.backup_root / f"{idx:02d}_{target.name}"
-                shutil.copy2(target, snapshot)
-                self._manifest.append((target, snapshot))
-            else:
-                self._manifest.append((target, None))
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
-        if exc_type is not None:
-            self.rollback()
-        else:
-            self.cleanup()
-        return False
-
-    def cleanup(self) -> None:
-        """Remove temporary transaction snapshots once outputs are validated."""
-        try:
-            if self.backup_root.exists():
-                shutil.rmtree(self.backup_root, ignore_errors=True)
-        except OSError:
-            pass
-
-    def rollback(self) -> None:
-        """Restore all pre-existing files atomically and remove newly created orphans."""
-        for target, snapshot in self._manifest:
-            try:
-                if snapshot is not None and snapshot.exists():
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    tmp_restore = target.with_name(f"{target.name}.rollback_{os.getpid()}")
-                    shutil.copy2(snapshot, tmp_restore)
-                    os.replace(tmp_restore, target)
-                elif snapshot is None and target.exists():
-                    target.unlink()
-            except Exception as rollback_exc:
-                print(f"   [ROLLBACK WARNING] Could not restore {target}: {rollback_exc}")
-        self.rolled_back = True
-        self.cleanup()
+# RegionTransaction is imported from backend.refresh_safety to provide
+# SHA-256 verified, journaled backup and crash recovery across runs.
 
 
 def _utc_iso(dt: Optional[datetime]) -> Optional[str]:
@@ -1069,6 +1021,7 @@ def build_run_summary_report(
     unit_tests: Dict[str, Any],
     errors: List[str],
     warnings: List[str],
+    transaction_recovery: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Assemble the canonical 12-item Standard Refresh Run Summary payload."""
     disc = discovery or {}
@@ -1186,6 +1139,7 @@ def build_run_summary_report(
             "errors": errors,
             "warnings": warnings,
             "skipped_regions": skipped_regions,
+            "transaction_recovery": transaction_recovery,
         },
         "regions": region_results,
     }
@@ -1225,12 +1179,85 @@ def run_standard_refresh(
     region_validators: Optional[Dict[str, Callable[..., Dict[str, Any]]]] = None,
     tx_backup_root: Optional[Path] = None,
     test_runner: Optional[Callable[..., Dict[str, Any]]] = None,
+    lock_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
-    Execute Steps 1–11 of the Standard Refresh Run Procedure across selected regions.
+    Acquire the process-wide refresh lock and execute Steps 1-11 safely.
+
+    If another refresh process already holds the lock, records the skipped
+    execution cleanly and returns status ``SKIPPED_LOCKED`` without modifying
+    project datasets or overwriting the latest valid run report.
     """
     exec_now = now_utc or datetime.now(timezone.utc)
     run_id = f"std_refresh_{exec_now.strftime('%Y%m%dT%H%M%SZ')}"
+    resolved_lock_path = lock_path or (report_dir / DEFAULT_LOCK_FILENAME)
+    lock = RefreshProcessLock(resolved_lock_path, run_id=run_id)
+    if not lock.acquire():
+        skipped_log = record_skipped_execution(
+            report_dir=report_dir,
+            run_id=run_id,
+            execution_dt=exec_now,
+            lock_path=resolved_lock_path,
+            lock_holder=lock.holder_info,
+        )
+        print(
+            f"[LOCKED] Concurrent Standard Refresh already active "
+            f"(lock={resolved_lock_path}, holder={lock.holder_info}). "
+            f"Exiting cleanly without modifying project data; recorded in {skipped_log}."
+        )
+        return {
+            "schema_version": "standard_refresh_report_v1",
+            "run_id": run_id,
+            "execution_timestamp_utc": _utc_iso(exec_now),
+            "status": "SKIPPED_LOCKED",
+            "lock_path": str(resolved_lock_path),
+            "lock_holder": lock.holder_info,
+            "skipped_runs_log": str(skipped_log),
+            "reason": "Another Standard Refresh process currently holds the refresh lock.",
+        }
+
+    try:
+        return _run_standard_refresh_locked(
+            run_id=run_id,
+            exec_now=exec_now,
+            regions=regions,
+            dry_run=dry_run,
+            offline=offline,
+            target_end_time=target_end_time,
+            max_latency_hours=max_latency_hours,
+            workers=workers,
+            skip_tests=skip_tests,
+            report_dir=report_dir,
+            env_file=env_file,
+            verify_model_load=verify_model_load,
+            region_executors=region_executors,
+            region_validators=region_validators,
+            tx_backup_root=tx_backup_root,
+            test_runner=test_runner,
+        )
+    finally:
+        lock.release()
+
+
+def _run_standard_refresh_locked(
+    run_id: str,
+    exec_now: datetime,
+    regions: Optional[Sequence[str]],
+    dry_run: bool,
+    offline: bool,
+    target_end_time: Optional[datetime],
+    max_latency_hours: float,
+    workers: int,
+    skip_tests: bool,
+    report_dir: Path,
+    env_file: Optional[Path],
+    verify_model_load: bool,
+    region_executors: Optional[Dict[str, Callable[..., Dict[str, Any]]]],
+    region_validators: Optional[Dict[str, Callable[..., Dict[str, Any]]]],
+    tx_backup_root: Optional[Path],
+    test_runner: Optional[Callable[..., Dict[str, Any]]],
+) -> Dict[str, Any]:
+    """Execute Steps 1-11 while holding the process-wide Standard Refresh lock."""
     selected_regions = normalize_regions(regions)
     skipped_regions = [r for r in REGION_ORDER if r not in selected_regions]
     specs = _build_region_specs()
@@ -1245,6 +1272,42 @@ def run_standard_refresh(
     print(f"LANDSLIDE PREDICTION SYSTEM — STANDARD REFRESH RUN ({run_id})")
     print(f"Execution UTC: {exec_now.strftime('%Y-%m-%dT%H:%M:%SZ')} | Regions: {selected_regions}")
     print("=" * 78)
+
+    tx_root_parent = tx_backup_root or (PROJECT_ROOT / "data" / "processed" / "_standard_refresh_tx_backups")
+    recovery_summary = recover_interrupted_transactions(tx_root_parent)
+    if recovery_summary["recovered_transactions"]:
+        warnings.append(
+            f"Recovered {len(recovery_summary['recovered_transactions'])} interrupted transaction(s) "
+            f"from an earlier crash: {[t['region_key'] for t in recovery_summary['recovered_transactions']]}."
+        )
+    if recovery_summary["preserved_uncertain"]:
+        warnings.append(
+            f"Preserved {len(recovery_summary['preserved_uncertain'])} uncertain/failed transaction backup(s) "
+            f"under {tx_root_parent} for operator inspection."
+        )
+    if recovery_summary["errors"]:
+        errors.extend(recovery_summary["errors"])
+        report = build_run_summary_report(
+            run_id=run_id,
+            execution_dt=exec_now,
+            status="FAILED",
+            preflight={
+                "status": "FAILED",
+                "checks_passed": 0,
+                "checks_total": 0,
+                "errors": list(recovery_summary["errors"]),
+            },
+            discovery=None,
+            region_results={},
+            skipped_regions=skipped_regions,
+            unit_tests=unit_tests,
+            errors=errors,
+            warnings=warnings,
+            transaction_recovery=recovery_summary,
+        )
+        _persist_run_reports(report, report_dir)
+        print(f"CRASH RECOVERY HALTED SAFELY: {recovery_summary['errors']}")
+        return report
 
     # Step 1: Pre-flight checks
     print("\n[STEP 1/11] Running pre-flight checks (environment, inputs, RF models, contracts)...")
@@ -1269,6 +1332,7 @@ def run_standard_refresh(
             unit_tests=unit_tests,
             errors=errors,
             warnings=warnings,
+            transaction_recovery=recovery_summary,
         )
         _persist_run_reports(report, report_dir)
         print(f"PRE-FLIGHT FAILED: {errors}")
@@ -1298,6 +1362,7 @@ def run_standard_refresh(
             unit_tests=unit_tests,
             errors=errors,
             warnings=warnings,
+            transaction_recovery=recovery_summary,
         )
         _persist_run_reports(report, report_dir)
         print(f"DISCOVERY/RETRIEVAL FAILED: {exc}")
@@ -1322,6 +1387,7 @@ def run_standard_refresh(
             unit_tests=unit_tests,
             errors=errors,
             warnings=warnings,
+            transaction_recovery=recovery_summary,
         )
         _persist_run_reports(report, report_dir)
         return report
@@ -1346,6 +1412,7 @@ def run_standard_refresh(
             unit_tests=unit_tests,
             errors=errors,
             warnings=warnings,
+            transaction_recovery=recovery_summary,
         )
         _persist_run_reports(report, report_dir)
         print(f"HALTED SAFELY: {msg}")
@@ -1378,12 +1445,11 @@ def run_standard_refresh(
     if region_executors:
         executors.update(region_executors)
 
-    tx_root_parent = tx_backup_root or (PROJECT_ROOT / "data" / "processed" / "_standard_refresh_tx_backups")
     tx_backup_base = tx_root_parent / run_id
     for rkey in selected_regions:
         spec = specs[rkey]
         print(f"\n[STEPS 4–9] Refreshing {spec['display_name']} ({spec['stages']})...")
-        tx = RegionTransaction(rkey, spec["tracked_outputs"], tx_backup_base / rkey)
+        tx = RegionTransaction(rkey, spec["tracked_outputs"], tx_backup_base / rkey, run_id=run_id)
         try:
             with tx:
                 executors[rkey]()
@@ -1424,7 +1490,10 @@ def run_standard_refresh(
             }
             print(f"  [ERROR] {err_msg}")
     try:
-        shutil.rmtree(tx_backup_base, ignore_errors=True)
+        # Remove only empty directories so any preserved ROLLBACK_FAILED or
+        # uncertain transaction backup directory stays intact for inspection.
+        if tx_backup_base.exists() and not any(tx_backup_base.iterdir()):
+            tx_backup_base.rmdir()
         if tx_backup_root is None and tx_root_parent.exists() and not any(tx_root_parent.iterdir()):
             tx_root_parent.rmdir()
     except OSError:
@@ -1468,6 +1537,7 @@ def run_standard_refresh(
         unit_tests=unit_tests,
         errors=errors,
         warnings=warnings,
+        transaction_recovery=recovery_summary,
     )
     ts_json, ts_md = _persist_run_reports(report, report_dir)
     print(f"  - JSON Report:     {ts_json}")
@@ -1494,6 +1564,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=4, help="Concurrent GPM download workers (default: 4).")
     parser.add_argument("--skip-tests", action="store_true", help="Skip Step 10 unittest suites.")
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR, help="Output directory for run reports.")
+    parser.add_argument("--lock-path", type=Path, default=None, help="Optional override for the process-wide refresh lock file.")
     return parser.parse_args(argv)
 
 
@@ -1515,8 +1586,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         workers=args.workers,
         skip_tests=args.skip_tests,
         report_dir=args.report_dir,
+        lock_path=args.lock_path,
     )
-    return 0 if report["status"] in ("SUCCESS", "DRY_RUN") else 1
+    return 0 if report["status"] in ("SUCCESS", "DRY_RUN", "SKIPPED_LOCKED") else 1
 
 
 if __name__ == "__main__":

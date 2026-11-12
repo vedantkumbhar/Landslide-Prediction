@@ -6,22 +6,22 @@
   "historical_events_count": 441,
   "provisional_background_samples_count": 477,
   "polygon_layers": {
-    "dynamic_risk_regions_count": 2898,
+    "dynamic_risk_regions_count": 3289,
     "terrain_regions_count": 3664,
-    "rainfall_regions_count": 226
+    "rainfall_regions_count": 167
   },
   "relative_category_cutoffs": {
-    "P50_low_to_moderate": 26.038674999999998,
-    "P80_moderate_to_high": 38.66518833333333,
-    "P95_high_to_very_high": 47.35423833333332
+    "P50_low_to_moderate": 24.5698,
+    "P80_moderate_to_high": 36.868586666666666,
+    "P95_high_to_very_high": 43.86234999999999
   },
   "gpm_observation_metadata": {
-    "observation_start_utc": "2026-11-10T14:00:00Z",
-    "observation_end_utc": "2026-11-11T14:00:00Z",
-    "latency_hours": 4.634,
+    "observation_start_utc": "2026-11-11T03:00:00Z",
+    "observation_end_utc": "2026-11-12T03:00:00Z",
+    "latency_hours": 5.035,
     "freshness_status": "SUCCESS",
     "is_24h_complete": true
   },
-  "generation_timestamp_utc": "2026-11-11T18:39:35Z",
+  "generation_timestamp_utc": "2026-11-12T08:02:45Z",
   "disclaimer": "EXPERIMENTAL PROVISIONAL SCREENING ONLY \u00b7 NOT AN OFFICIAL WARNING OR CALIBRATED PROBABILITY"
 }

@@ -378,15 +378,77 @@ class TestWesternGhatsDynamicRisk(unittest.TestCase):
         self.assertIn("screening_disclaimer", out_df.columns)
         self.assertTrue((out_df["screening_disclaimer"] == DISCLAIMER_TEXT).all())
 
+    def _create_controlled_integrated_fixture(self) -> Path:
+        """Build an isolated 1,582-row / 14-tile fixture CSV with valid controlled rainfall."""
+        fixtures_dir = self.temp_dir / "fixtures"
+        fixtures_dir.mkdir(parents=True, exist_ok=True)
+        n = EXPECTED_LOCATIONS_COUNT
+        idx = np.arange(n, dtype=float)
+        tiles = [f"WG_TEST_TILE_{i % EXPECTED_TILES_COUNT:02d}" for i in range(n)]
+
+        # First 300 records have exact zero rainfall; remaining vary cleanly across positive intensities
+        rain_factor = np.where(idx >= 300, (idx - 299) / float(n - 300), 0.0)
+        df = pd.DataFrame({
+            "record_id": [f"rec_{i:04d}" for i in range(n)],
+            "sample_id": [f"samp_{i:04d}" for i in range(n)],
+            "tile": tiles,
+            "dem_region": ["Western Ghats"] * n,
+            "subregion": ["Limited Pilot Fixture"] * n,
+            "latitude": 10.0 + (idx % 100) * 0.05,
+            "longitude": 74.0 + (idx // 100) * 0.05,
+            "elevation_m": 100.0 + (idx % 50) * 20.0,
+            "slope_degrees": 5.0 + (idx % 35),
+            "aspect_sin": np.sin(idx * 0.1),
+            "aspect_cos": np.cos(idx * 0.1),
+            "aspect_flat": np.zeros(n, dtype=int),
+            "terrain_rf_prob_balanced": np.linspace(0.05, 0.95, n),
+            "gpm_latest_rainfall_rate_mm_hr": rain_factor * 8.0,
+            "gpm_1h_accumulation_mm": rain_factor * 18.0,
+            "gpm_3h_accumulation_mm": rain_factor * 36.0,
+            "gpm_6h_accumulation_mm": rain_factor * 54.0,
+            "gpm_12h_accumulation_mm": rain_factor * 72.0,
+            "gpm_24h_accumulation_mm": rain_factor * 95.0,
+            "gpm_24h_complete": [True] * n,
+        })
+        csv_path = fixtures_dir / "western_ghats_terrain_rainfall_integrated_fixture.csv"
+        df.to_csv(csv_path, index=False)
+        return csv_path
+
+    def _write_refresh_status_fixture(
+        self,
+        filename: str,
+        observation_end_utc: str,
+        status: str = "SUCCESS",
+        is_24h_complete: bool = True,
+    ) -> Path:
+        """Write an isolated refresh status JSON fixture in the temporary directory."""
+        fixtures_dir = self.temp_dir / "fixtures"
+        fixtures_dir.mkdir(parents=True, exist_ok=True)
+        status_path = fixtures_dir / filename
+        payload = {
+            "status": status,
+            "is_24h_complete": is_24h_complete,
+            "observation_end_utc": observation_end_utc,
+            "gpm_product": "NASA_GPM_IMERG_V07C_Early",
+            "spatial_resolution": "0.1_deg_geographic",
+        }
+        with open(status_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        return status_path
+
     def test_end_to_end_production_integration(self):
-        """Execute end-to-end pipeline using production Stage 6C input files into a temporary directory."""
-        if not DEFAULT_INTEGRATED_CSV.exists() or not DEFAULT_REFRESH_STATUS_JSON.exists():
-            self.skipTest("Production input datasets not available for integration test.")
+        """Execute end-to-end Stage 6D pipeline using isolated fresh fixtures into a temporary directory."""
+        fixture_csv = self._create_controlled_integrated_fixture()
+        fresh_obs_end = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        fixture_status = self._write_refresh_status_fixture(
+            "fresh_refresh_status.json",
+            observation_end_utc=fresh_obs_end,
+        )
 
         prod_out_dir = self.temp_dir / "prod_run"
         result = run_western_ghats_dynamic_risk_pipeline(
-            integrated_csv_path=DEFAULT_INTEGRATED_CSV,
-            status_json_path=DEFAULT_REFRESH_STATUS_JSON,
+            integrated_csv_path=fixture_csv,
+            status_json_path=fixture_status,
             output_dir=prod_out_dir,
             max_latency_hours=12.0,
         )
@@ -396,13 +458,62 @@ class TestWesternGhatsDynamicRisk(unittest.TestCase):
         self.assertTrue(result["metadata_path"].exists())
         self.assertTrue(result["report_path"].exists())
 
-        # Verify output CSV records and columns
         prod_df = pd.read_csv(result["csv_path"])
         self.assertEqual(len(prod_df), EXPECTED_LOCATIONS_COUNT)
         self.assertEqual(len(prod_df["tile"].unique()), EXPECTED_TILES_COUNT)
         self.assertIn("dynamic_risk_index", prod_df.columns)
         self.assertIn("risk_category_relative", prod_df.columns)
         self.assertIn("screening_disclaimer", prod_df.columns)
+        self.assertTrue((prod_df["screening_disclaimer"] == DISCLAIMER_TEXT).all())
+        for cat in ("Low", "Moderate", "High", "Very High"):
+            self.assertGreater((prod_df["risk_category_relative"] == cat).sum(), 0)
+
+        with open(result["metadata_path"], "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        self.assertEqual(meta["gpm_observation_metadata"]["observation_end_utc"], fresh_obs_end)
+        self.assertLessEqual(meta["gpm_observation_metadata"]["independently_calculated_latency_hours"], 12.0)
+
+        with open(result["report_path"], "r", encoding="utf-8") as f:
+            report = json.load(f)
+        self.assertEqual(report["status"], "PASSED")
+
+    def test_end_to_end_stale_data_rejected(self):
+        """Verify pipeline strictly rejects stale refresh data (both deterministic fixture and stale production status)."""
+        fixture_csv = self._create_controlled_integrated_fixture()
+        stale_status = self._write_refresh_status_fixture(
+            "stale_refresh_status.json",
+            observation_end_utc="2026-11-11T12:00:00Z",
+        )
+        stale_out_dir = self.temp_dir / "stale_fixture_run"
+        ref_now = datetime(2026, 11, 12, 8, 0, 0, tzinfo=timezone.utc)  # 20.0h latency > 12.0h
+
+        with self.assertRaises(RuntimeError) as ctx:
+            run_western_ghats_dynamic_risk_pipeline(
+                integrated_csv_path=fixture_csv,
+                status_json_path=stale_status,
+                output_dir=stale_out_dir,
+                max_latency_hours=12.0,
+                now_utc=ref_now,
+            )
+        self.assertIn("freshness gate failed", str(ctx.exception))
+        self.assertIn("stale", str(ctx.exception).lower())
+        self.assertFalse((stale_out_dir / "western_ghats_dynamic_hazard_risk.csv").exists())
+
+        if DEFAULT_INTEGRATED_CSV.exists() and DEFAULT_REFRESH_STATUS_JSON.exists():
+            prod_is_fresh, _, _ = verify_rainfall_freshness_gate(
+                DEFAULT_REFRESH_STATUS_JSON, max_latency_hours=12.0
+            )
+            if not prod_is_fresh:
+                prod_stale_out_dir = self.temp_dir / "stale_prod_run"
+                with self.assertRaises(RuntimeError) as prod_ctx:
+                    run_western_ghats_dynamic_risk_pipeline(
+                        integrated_csv_path=DEFAULT_INTEGRATED_CSV,
+                        status_json_path=DEFAULT_REFRESH_STATUS_JSON,
+                        output_dir=prod_stale_out_dir,
+                        max_latency_hours=12.0,
+                    )
+                self.assertIn("freshness gate failed", str(prod_ctx.exception))
+                self.assertFalse((prod_stale_out_dir / "western_ghats_dynamic_hazard_risk.csv").exists())
 
 
 if __name__ == "__main__":
