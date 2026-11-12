@@ -109,6 +109,10 @@ def _make_published_report(
             "errors": [],
             "warnings": [],
         },
+        "unified_map": {
+            "status": "SUCCESS",
+            "observation_end_utc": obs_end,
+        },
         "regions": regions_payload,
     }
 
@@ -161,6 +165,12 @@ class TestScheduledRefreshStage2(unittest.TestCase):
                 "risk_metadata_json": risk_meta,
                 "map_metadata_json": map_meta,
             }
+
+        u_map = self.outputs_dir / "india_unified_dynamic_risk_map.html"
+        u_map.write_text(
+            f"<html><body>Unified Map {obs_end} computeFreshness updateFreshnessStatus 60000</body></html>",
+            encoding="utf-8",
+        )
         return specs
 
     def _write_latest_report(self, payload: dict) -> Path:

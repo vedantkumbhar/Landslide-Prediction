@@ -44,6 +44,9 @@ from backend.run_standard_refresh import (
     normalize_regions,
     run_standard_refresh,
 )
+from backend.create_india_unified_risk_map import (
+    DEFAULT_OUTPUT_HTML as UNIFIED_HTML_MAP,
+)
 
 SCHEDULER_LOG_FILENAME = "scheduler.log"
 SCHEDULER_LOG_MAX_BYTES = 5 * 1024 * 1024
@@ -161,10 +164,13 @@ def _validate_discovery_gate(
 def _validate_required_region_outputs(
     region_specs: Dict[str, Dict[str, Any]],
     expected_obs_end_dt: datetime,
+    unified_map_path: Optional[Path] = None,
 ) -> Tuple[bool, str]:
     """
     Ensure every region's tracked outputs exist and are non-empty, and verify any
     on-disk observation metadata agrees with the expected window end timestamp.
+    Also verifies the Unified India dynamic risk HTML map exists, is non-empty,
+    and reflects the expected observation window.
     """
     for rkey in REGION_ORDER:
         spec = region_specs.get(rkey)
@@ -206,7 +212,39 @@ def _validate_required_region_outputs(
                             f"expected {_utc_iso(expected_obs_end_dt)!r}."
                         )
 
-    return True, "All required outputs across all three regions exist and are non-empty."
+    # Validate Unified India dynamic risk map
+    if unified_map_path is not None:
+        u_path = Path(unified_map_path)
+    else:
+        sample_output = None
+        for spec in region_specs.values():
+            tracked = spec.get("tracked_outputs") or []
+            if tracked:
+                sample_output = Path(tracked[0])
+                break
+        if sample_output is not None:
+            u_path = sample_output.parent.parent / "india_unified_dynamic_risk_map.html"
+        else:
+            u_path = UNIFIED_HTML_MAP
+    if not u_path.exists() or not u_path.is_file() or u_path.stat().st_size <= 0:
+        return False, f"Unified India map is missing or empty: {u_path}"
+
+    try:
+        u_text = u_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        return False, f"Unable to read unified India map {u_path}: {exc}"
+
+    expected_end_str = _utc_iso(expected_obs_end_dt)
+    if expected_end_str not in u_text:
+        return False, (
+            f"Unified India map {u_path.name} observation timestamp does not match "
+            f"expected {expected_end_str}."
+        )
+    for guard_token in ("computeFreshness", "updateFreshnessStatus", "60000"):
+        if guard_token not in u_text:
+            return False, f"Unified India map {u_path.name} missing freshness guard token: {guard_token}"
+
+    return True, "All required outputs across all three regions and unified India map exist and are non-empty."
 
 
 def evaluate_unchanged_window_skip(
@@ -215,6 +253,7 @@ def evaluate_unchanged_window_skip(
     region_specs: Optional[Dict[str, Dict[str, Any]]] = None,
     max_latency_hours: float = DEFAULT_MAX_LATENCY_HOURS,
     force: bool = False,
+    unified_map_path: Optional[Path] = None,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     """
     Determine whether regional processing can be safely skipped because the
@@ -275,6 +314,19 @@ def evaluate_unchanged_window_skip(
     if isinstance(val_section, dict) and val_section.get("skipped_regions"):
         return False, f"Previous run skipped regions: {val_section.get('skipped_regions')}.", {}
 
+    prev_umap = prev_report.get("unified_map")
+    if prev_umap is not None:
+        if not isinstance(prev_umap, dict):
+            return False, "Previous report 'unified_map' is not a dictionary.", {}
+        if prev_umap.get("status") != "SUCCESS":
+            return False, f"Previous run unified map status is {prev_umap.get('status')!r} (requires 'SUCCESS').", {}
+        umap_end = parse_iso8601_utc(prev_umap.get("observation_end_utc"))
+        if umap_end is None or umap_end != disc_end_dt:
+            return False, (
+                f"Previous run unified map observation window does not match discovered window "
+                f"({prev_umap.get('observation_end_utc')!r} vs {_utc_iso(disc_end_dt)!r})."
+            ), {}
+
     prev_regions = prev_report.get("regions")
     if not isinstance(prev_regions, dict):
         return False, "Previous report missing 'regions' section.", {}
@@ -300,7 +352,9 @@ def evaluate_unchanged_window_skip(
             ), {}
 
     specs = region_specs if region_specs is not None else _build_region_specs()
-    outputs_ok, outputs_reason = _validate_required_region_outputs(specs, disc_end_dt)
+    outputs_ok, outputs_reason = _validate_required_region_outputs(
+        specs, disc_end_dt, unified_map_path=unified_map_path
+    )
     if not outputs_ok:
         return False, outputs_reason, {}
 
@@ -337,6 +391,8 @@ def run_scheduled_refresh(
     region_executors: Optional[Dict[str, Callable[..., Dict[str, Any]]]] = None,
     region_validators: Optional[Dict[str, Callable[..., Dict[str, Any]]]] = None,
     test_runner: Optional[Callable[..., Dict[str, Any]]] = None,
+    unified_map_path: Optional[Path] = None,
+    unified_map_generator: Optional[Callable[..., Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Execute an intelligent scheduled GPM refresh check and run full processing only
@@ -471,6 +527,7 @@ def run_scheduled_refresh(
                 region_specs=specs,
                 max_latency_hours=max_latency_hours,
                 force=force,
+                unified_map_path=unified_map_path,
             )
             if should_skip:
                 logger.info(
@@ -552,6 +609,10 @@ def run_scheduled_refresh(
             runner_kwargs["region_validators"] = region_validators
         if test_runner is not None:
             runner_kwargs["test_runner"] = test_runner
+        if unified_map_generator is not None:
+            runner_kwargs["unified_map_generator"] = unified_map_generator
+        if unified_map_path is not None:
+            runner_kwargs["unified_map_path"] = unified_map_path
 
         try:
             report = runner(**runner_kwargs)

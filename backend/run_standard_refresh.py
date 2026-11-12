@@ -127,6 +127,10 @@ from backend.create_western_ghats_polygon_risk_map import (
     DEFAULT_VALIDATION_REPORT as WG_MAP_REPORT_JSON,
     generate_western_ghats_polygon_risk_map,
 )
+from backend.create_india_unified_risk_map import (
+    DEFAULT_OUTPUT_HTML as UNIFIED_HTML_MAP,
+    generate_india_unified_risk_map,
+)
 
 
 DEFAULT_REPORT_DIR = OUTPUTS_DIR / "refresh_reports"
@@ -1007,6 +1011,28 @@ def render_run_summary_markdown(report: Dict[str, Any]) -> str:
         lines.append(f"  - `{s['module']}`: passed=`{s['passed']}` ({s['elapsed_seconds']}s) — {s['summary']}")
 
     lines.append("")
+
+    umap = report.get("unified_map")
+    if isinstance(umap, dict):
+        lines.append("## Unified India Landslide Dynamic Risk Map")
+        lines.append("")
+        lines.append(f"- **Status**: `{umap.get('status')}`")
+        if umap.get("status") == "SUCCESS":
+            lines.append(f"- **HTML Map**: `{umap.get('output_html')}` (`{umap.get('html_size_bytes', 0):,}` bytes, `{umap.get('html_size_mb', 0):.2f}` MB)")
+            lines.append(f"- **Observation Window (UTC)**: `{umap.get('observation_start_utc')}` to `{umap.get('observation_end_utc')}` (Latency: `{umap.get('latency_hours')} h`)")
+            lines.append(f"- **Generation Timestamp (UTC)**: `{umap.get('generation_timestamp_utc')}`")
+            lines.append(f"- **Validation Passed**: `{umap.get('validation_passed')}`")
+            counts = umap.get("counts", {})
+            lines.append(f"- **Feature Counts**: Total Cells=`{counts.get('total_cells', 0):,}`, Events=`{counts.get('total_events', 0):,}`, Background=`{counts.get('total_background', 0):,}`")
+        else:
+            if umap.get("reason"):
+                lines.append(f"- **Reason**: {umap.get('reason')}")
+            if umap.get("error"):
+                lines.append(f"- **Error**: {umap.get('error')}")
+            if umap.get("output_html"):
+                lines.append(f"- **Output HTML Target**: `{umap.get('output_html')}`")
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -1022,6 +1048,7 @@ def build_run_summary_report(
     errors: List[str],
     warnings: List[str],
     transaction_recovery: Optional[Dict[str, Any]] = None,
+    unified_map: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Assemble the canonical 12-item Standard Refresh Run Summary payload."""
     disc = discovery or {}
@@ -1141,6 +1168,7 @@ def build_run_summary_report(
             "skipped_regions": skipped_regions,
             "transaction_recovery": transaction_recovery,
         },
+        "unified_map": unified_map or {"status": "NOT_RUN", "reason": "Unified map generation was not executed."},
         "regions": region_results,
     }
 
@@ -1180,6 +1208,9 @@ def run_standard_refresh(
     tx_backup_root: Optional[Path] = None,
     test_runner: Optional[Callable[..., Dict[str, Any]]] = None,
     lock_path: Optional[Path] = None,
+    region_specs: Optional[Dict[str, Dict[str, Any]]] = None,
+    unified_map_generator: Optional[Callable[..., Dict[str, Any]]] = None,
+    unified_map_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
     Acquire the process-wide refresh lock and execute Steps 1-11 safely.
@@ -1234,6 +1265,9 @@ def run_standard_refresh(
             region_validators=region_validators,
             tx_backup_root=tx_backup_root,
             test_runner=test_runner,
+            region_specs=region_specs,
+            unified_map_generator=unified_map_generator,
+            unified_map_path=unified_map_path,
         )
     finally:
         lock.release()
@@ -1256,11 +1290,14 @@ def _run_standard_refresh_locked(
     region_validators: Optional[Dict[str, Callable[..., Dict[str, Any]]]],
     tx_backup_root: Optional[Path],
     test_runner: Optional[Callable[..., Dict[str, Any]]],
+    region_specs: Optional[Dict[str, Dict[str, Any]]] = None,
+    unified_map_generator: Optional[Callable[..., Dict[str, Any]]] = None,
+    unified_map_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Execute Steps 1-11 while holding the process-wide Standard Refresh lock."""
     selected_regions = normalize_regions(regions)
     skipped_regions = [r for r in REGION_ORDER if r not in selected_regions]
-    specs = _build_region_specs()
+    specs = region_specs if region_specs is not None else _build_region_specs()
 
     errors: List[str] = []
     warnings: List[str] = []
@@ -1513,11 +1550,95 @@ def _run_standard_refresh_locked(
     elif skip_tests:
         warnings.append("Unit test verification skipped (--skip-tests).")
 
-    # Final status determination: SUCCESS requires all selected regions + validation + executed tests passing
     n_success = len(succeeded_regions)
     n_selected = len(selected_regions)
     tests_ok = True if skip_tests else bool(unit_tests.get("all_passed", False))
-    if n_success == n_selected and tests_ok and not errors:
+
+    # Step 10.5: Unified India Landslide Risk Map generation
+    unified_map_summary: Dict[str, Any] = {"status": "NOT_RUN"}
+    all_three_selected = set(selected_regions) == set(REGION_ORDER)
+    all_three_succeeded = n_success == len(REGION_ORDER)
+    all_windows_match_discovery = (
+        discovery is not None
+        and all(
+            region_results.get(r, {}).get("observation_end_utc") == discovery.get("observation_end_utc")
+            for r in REGION_ORDER
+        )
+    )
+
+    target_unified_path = unified_map_path or UNIFIED_HTML_MAP
+    if not all_three_selected:
+        unified_map_summary = {
+            "status": "SKIPPED_PARTIAL_REGIONS",
+            "reason": f"Partial-region refresh selected ({selected_regions}); preserved existing unified map unchanged.",
+            "output_html": str(target_unified_path),
+        }
+    elif not all_three_succeeded:
+        unified_map_summary = {
+            "status": "SKIPPED_REGIONAL_FAILURE",
+            "reason": "One or more regional pipelines failed; preserved existing unified map unchanged.",
+            "output_html": str(target_unified_path),
+        }
+    elif not tests_ok:
+        unified_map_summary = {
+            "status": "SKIPPED_TESTS_FAILED",
+            "reason": "Regional validation unit tests failed; skipped unified map generation.",
+            "output_html": str(target_unified_path),
+        }
+    elif bool(errors):
+        unified_map_summary = {
+            "status": "SKIPPED_PRIOR_ERRORS",
+            "reason": "Prior operational errors occurred; skipped unified map generation.",
+            "output_html": str(target_unified_path),
+        }
+    elif not all_windows_match_discovery:
+        unified_map_summary = {
+            "status": "SKIPPED_TIMESTAMP_MISMATCH",
+            "reason": "Regional observation timestamps did not match current discovery window.",
+            "output_html": str(target_unified_path),
+        }
+    else:
+        print("\n[STEP 10.5/11] Generating Unified India Dynamic Risk Map...")
+        gen_fn = unified_map_generator or generate_india_unified_risk_map
+        try:
+            u_res = gen_fn(
+                output_html_path=target_unified_path,
+                max_latency_hours=max_latency_hours,
+                now_utc=exec_now,
+                overwrite=True,
+            )
+            unified_map_summary = {
+                "status": "SUCCESS",
+                "validation_passed": True,
+                "output_html": str(target_unified_path),
+                "html_size_bytes": u_res.get("html_size_bytes"),
+                "html_size_mb": u_res.get("html_size_mb"),
+                "observation_start_utc": u_res.get("observation_start_utc"),
+                "observation_end_utc": u_res.get("observation_end_utc"),
+                "generation_timestamp_utc": u_res.get("generation_timestamp_utc"),
+                "latency_hours": u_res.get("latency_hours"),
+                "counts": u_res.get("counts"),
+            }
+            print(f"  Unified India Map generated atomically ({u_res.get('html_size_bytes', 0):,} bytes): {target_unified_path}")
+        except Exception as exc:
+            err_msg = f"Unified India map generation failed: {exc}"
+            errors.append(err_msg)
+            unified_map_summary = {
+                "status": "FAILED",
+                "validation_passed": False,
+                "output_html": str(target_unified_path),
+                "error": str(exc),
+                "traceback": traceback.format_exc()[-800:],
+            }
+            print(f"  [ERROR] {err_msg}")
+
+    # Final status determination:
+    # SUCCESS requires: all selected regions succeeded + tests passed + no errors + (if all 3 selected, unified map succeeded)
+    unified_ok = True
+    if all_three_selected and unified_map_summary.get("status") != "SUCCESS":
+        unified_ok = False
+
+    if n_success == n_selected and tests_ok and not errors and unified_ok:
         final_status = "SUCCESS"
     elif n_success > 0:
         final_status = "PARTIAL"
@@ -1538,6 +1659,7 @@ def _run_standard_refresh_locked(
         errors=errors,
         warnings=warnings,
         transaction_recovery=recovery_summary,
+        unified_map=unified_map_summary,
     )
     ts_json, ts_md = _persist_run_reports(report, report_dir)
     print(f"  - JSON Report:     {ts_json}")
