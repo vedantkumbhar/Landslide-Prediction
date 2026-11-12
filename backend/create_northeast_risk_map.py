@@ -55,6 +55,7 @@ from backend.export_northeast_dynamic_risk_geojson import (
 )
 from backend.gis_refresh_utils import (
     atomic_copy_file,
+    atomic_save_map_html,
     atomic_write_json,
     build_5km_spatial_cells_utm,
     build_compute_freshness_js,
@@ -1328,11 +1329,10 @@ __SHARED_RAIN_ROWS_JS__
 
     # 10. Save HTML Map Atomically
     print(f"\n6. Saving regional GIS map HTML to: {output_html_path.name}...")
-    output_html_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_html = output_html_path.with_name(f"{output_html_path.name}.tmp_{os.getpid()}")
-    map_obj.save(str(tmp_html))
-    os.replace(tmp_html, output_html_path)
-    map_size = output_html_path.stat().st_size
+    map_size = atomic_save_map_html(
+        output_html_path,
+        lambda tmp_path: map_obj.save(str(tmp_path)),
+    )
     print(f"   - Map saved atomically ({map_size:,} bytes)")
 
     # 11. Export GeoJSON Deliverables Atomically

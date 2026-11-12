@@ -64,6 +64,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.gis_refresh_utils import (
+    atomic_save_map_html,
     build_gpm_rainfall_rows_js,
     dissolve_hazard_layer_into_regions as _shared_dissolve_regions,
     export_cells_geojson as _shared_export_cells_geojson,
@@ -1400,12 +1401,13 @@ def generate_himalayas_dynamic_risk_map(
     """
     map_obj.get_root().html.add_child(folium.Element(legend_html))
 
-    # 11. Save Map HTML
-    output_html_path.parent.mkdir(parents=True, exist_ok=True)
+    # 11. Save Map HTML Atomically
     print(f"\n7. Saving regional GIS map HTML to: {output_html_path.name}...")
-    map_obj.save(str(output_html_path))
-    html_file_size = output_html_path.stat().st_size
-    print(f"   - Map saved successfully ({html_file_size:,} bytes)")
+    html_file_size = atomic_save_map_html(
+        output_html_path,
+        lambda tmp_path: map_obj.save(str(tmp_path)),
+    )
+    print(f"   - Map saved atomically ({html_file_size:,} bytes)")
 
     # 12. Export Regional Polygon GeoJSON
     print(f"\n8. Exporting Regional Polygon GeoJSON to: {output_regions_geojson_path.name}...")

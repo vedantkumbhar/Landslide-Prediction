@@ -16,7 +16,8 @@ import math
 import os
 from pathlib import Path
 import shutil
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+import uuid
 
 import geopandas as gpd
 import numpy as np
@@ -272,6 +273,40 @@ def atomic_copy_file(src: Path, dst: Path) -> Path:
             tmp_path.unlink(missing_ok=True)
         raise
     return dst
+
+
+def atomic_save_map_html(
+    target: Path,
+    writer_fn: Callable[[Path], None],
+) -> int:
+    """
+    Safely write an HTML map via a PID-unique temporary file in ``target.parent``.
+
+    Verifies the temporary file exists and is non-empty before atomically replacing
+    ``target`` via ``os.replace()``. On failure, preserves any prior ``target`` and
+    removes only the temporary file created by this invocation.
+    """
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = target.with_name(
+        f".{target.name}.tmp.{os.getpid()}.{uuid.uuid4().hex[:8]}"
+    )
+    try:
+        writer_fn(tmp_path)
+        if not tmp_path.exists() or not tmp_path.is_file():
+            raise RuntimeError(f"Generated temporary HTML map file does not exist: {tmp_path}")
+        tmp_size = tmp_path.stat().st_size
+        if tmp_size <= 0:
+            raise RuntimeError(f"Generated temporary HTML map file is empty (0 bytes): {tmp_path}")
+        os.replace(tmp_path, target)
+    except Exception:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        raise
+    return target.stat().st_size
 
 
 def utm_epsg_for_tile(tile: str) -> int:

@@ -43,6 +43,7 @@ import shapely.geometry
 
 from backend.gis_refresh_utils import (
     MAX_DATA_LATENCY_HOURS,
+    atomic_save_map_html,
     atomic_write_json,
     build_5km_spatial_cells_utm,
     build_compute_freshness_js,
@@ -1247,19 +1248,14 @@ def generate_western_ghats_polygon_risk_map(
     )
     map_obj.get_root().html.add_child(folium.Element(legend_html))
 
-    output_html_path.parent.mkdir(parents=True, exist_ok=True)
     rendered_html = map_obj.get_root().render()
     clean_html = "\n".join(line.rstrip(" \t") for line in rendered_html.splitlines()) + "\n"
-    tmp_html = output_html_path.with_name(f"{output_html_path.name}.tmp")
-    try:
-        with open(tmp_html, "wb") as f:
+
+    def _write_clean_html(tmp_path: Path) -> None:
+        with open(tmp_path, "wb") as f:
             f.write(clean_html.encode("utf-8"))
-        tmp_html.replace(output_html_path)
-    except Exception:
-        if tmp_html.exists():
-            tmp_html.unlink(missing_ok=True)
-        raise
-    html_file_size = output_html_path.stat().st_size
+
+    html_file_size = atomic_save_map_html(output_html_path, _write_clean_html)
 
     export_regions_geojson(
         gdf_regions=gdf_risk_regions,
