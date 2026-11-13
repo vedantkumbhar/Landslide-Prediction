@@ -1,316 +1,311 @@
-\# 🌍 Landslide Prediction Mega Project
+# 🌍 India Landslide Prediction & Dynamic Risk Monitoring System
 
+An AI/ML-powered, GIS-based landslide risk assessment and monitoring system for selected landslide-prone regions of India, integrating terrain characteristics, historical landslide records, and NASA GPM IMERG satellite rainfall observations.
 
+**Project:** Landslide Prediction Mega Project
 
-\## Project Overview
+**Status:** Research Prototype — Core Monitoring Pipeline Implemented
 
+**Repository:** [Landslide-Prediction](https://github.com/vedantkumbhar/Landslide-Prediction)
 
+---
 
-The \*\*Landslide Prediction Mega Project\*\* aims to develop an AI/ML-based system for landslide risk assessment, prediction, and monitoring across selected regions of India.
+## 1. Project Overview
 
+Landslides are a major natural hazard in several parts of India. Their occurrence is influenced by multiple factors, including terrain characteristics, slope conditions, historical landslide activity, and rainfall.
 
+This project aims to develop a regional AI/ML-based system for landslide susceptibility assessment and dynamic rainfall-responsive risk monitoring.
 
-The project combines historical landslide records, GIS data, Digital Elevation Models (DEM), terrain characteristics, rainfall information, and satellite-based environmental monitoring.
+The system combines:
 
+- Historical landslide event records.
+- Digital Elevation Models (DEM).
+- Terrain-derived features such as elevation, slope, and aspect.
+- Regional machine learning models.
+- NASA GPM IMERG satellite rainfall observations.
+- GIS-based spatial analysis and visualization.
+- Automated rainfall refresh and risk-map generation.
 
+The objective is to move beyond static historical landslide maps and provide regularly updated screening-level risk information for monitored grid locations.
 
-The long-term goal is to develop a dynamic GIS-based risk map that responds to changing rainfall and environmental conditions.
+## 2. Target Regions
 
+The system focuses on three geographical regions:
 
+| Region | Implementation Status |
+|---|---|
+| Himalayas | Regional monitoring pipeline implemented |
+| Northeast India | Regional monitoring pipeline implemented |
+| Western Ghats | Limited pilot implementation |
 
-\## Target Regions
+**Important — Western Ghats limitation:** The current Western Ghats implementation is a limited pilot based on available Western Maharashtra data and selected pilot areas. It is not representative of the entire Western Ghats region.
 
+## 3. System Architecture
 
+The project follows a multi-stage processing workflow:
 
-The project focuses on three major geographical regions:
+1. **Data acquisition:** Collect historical landslide records, terrain datasets, and satellite rainfall observations.
+2. **Data preprocessing:** Clean, validate, and prepare geospatial and environmental features.
+3. **Terrain analysis:** Extract terrain characteristics from DEM datasets.
+4. **Regional ML assessment:** Apply region-specific trained models.
+5. **Rainfall integration:** Retrieve and process NASA GPM IMERG rainfall observations.
+6. **Dynamic risk assessment:** Combine terrain susceptibility and rainfall-related indicators.
+7. **GIS visualization:** Generate regional and unified India risk maps.
+8. **Automated refresh:** Periodically refresh rainfall inputs and regenerate validated outputs.
 
+## 4. Satellite Rainfall Integration
 
+### NASA GPM IMERG
 
-1\. \*\*Himalayas\*\*
+The system integrates NASA Global Precipitation Measurement (GPM) Integrated Multi-satellitE Retrievals for GPM (IMERG), using the Early Run V07C product.
 
-2\. \*\*Northeast India\*\*
+Implemented capabilities include:
 
-3\. \*\*Western Ghats\*\*
+- NASA Common Metadata Repository (CMR) granule discovery.
+- Retrieval and reuse of satellite rainfall granules.
+- Contiguous 24-hour observation-window processing.
+- Half-hourly rainfall granule integration.
+- Rainfall feature generation for 1-hour, 3-hour, 6-hour, 12-hour, and 24-hour windows.
+- Regional rainfall-to-risk processing.
+- Observation freshness and completeness validation.
 
+**Data freshness safeguard:** Rainfall observations older than the configured 12-hour threshold are not silently treated as current. Affected rainfall-driven risk assessments are marked `UNASSESSED` until valid observations become available.
 
+**Spatial resolution note:** GPM IMERG has an approximately 0.1° native spatial resolution. A finer model or GIS grid does not increase the native resolution of the satellite rainfall observations.
 
-\*\*Important:\*\* Western Maharashtra is being used as a limited pilot area. Its dataset should not be considered representative of the entire Western Ghats.
+### ISRO INSAT
 
+ISRO INSAT satellite integration is planned as a future enhancement. It is not part of the currently implemented production rainfall pipeline.
 
+## 5. Machine Learning and Risk Assessment
 
-\## Technology Stack
+The project uses regional machine learning models and terrain-related features to support landslide susceptibility assessment.
 
+The current implementation includes:
 
+- Regional model workflows for the target regions.
+- Frozen trained models used during production refreshes.
+- Terrain susceptibility assessment.
+- Rainfall-responsive risk calculations.
+- Spatial grid-based monitoring.
+- Historical landslide and background sample layers.
 
-\- \*\*Programming:\*\* Python
+**Important:** The scheduled production refresh uses the existing trained models. It does not retrain models during routine rainfall updates.
 
-\- \*\*Machine Learning:\*\* Scikit-learn, TensorFlow
+Risk categories are experimental screening indicators. They should not be interpreted as calibrated probabilities, official warnings, or confirmed landslide predictions.
 
-\- \*\*Data Processing:\*\* Pandas, NumPy
+## 6. Dynamic GIS Dashboard
 
-\- \*\*GIS and Remote Sensing:\*\* Rasterio, GDAL
+The project generates a unified India dynamic landslide risk map:
 
-\- \*\*Geospatial Data:\*\* DEM, elevation, slope, aspect
+`outputs/india_unified_dynamic_risk_map.html`
 
-\- \*\*Frontend:\*\* HTML, CSS, JavaScript
+The dashboard provides:
 
-\- \*\*Backend:\*\* Python-based processing and API workflows
+- Interactive Leaflet-based GIS visualization.
+- Regional navigation and monitoring.
+- Independently toggleable map layers.
+- Rainfall-responsive risk information.
+- Historical landslide event visualization.
+- Background sample visualization.
+- Regional telemetry and freshness information.
+- Live UTC clock.
+- Risk assessment and data-quality disclosures.
 
-\- \*\*Satellite Data Integration:\*\* NASA GPM IMERG and ISRO INSAT (planned)
+Historical landslide locations are maintained separately from currently monitored grid-cell risk information.
 
+The dashboard is regenerated through the standard refresh workflow after successful regional processing and validation.
 
+## 7. Automated Monitoring and Refresh
 
-\## Project Structure
+The project includes an automated NASA GPM rainfall refresh workflow using Windows Task Scheduler.
 
-
-
-```text
-
-Landslide-Prediction/
-
-│
-
-├── backend/
-
-│   └── app/
-
-│
-
-├── frontend/
-
-│
-
-├── gis/
-
-│   ├── DEM processing
-
-│   ├── terrain extraction
-
-│   ├── feature preparation
-
-│   └── regional validation
-
-│
-
-├── ml/
-
-│   ├── train\_baseline.py
-
-│   └── model validation scripts
-
-│
-
-├── reports/
-
-│   ├── regional\_baseline\_evaluation/
-
-│   └── terrain\_rainfall\_baseline/
-
-│
-
-├── tests/
-
-│
-
-├── data/                 # Excluded from GitHub
-
-├── requirements.txt
-
-├── .gitignore
-
-└── README.md
-
-```
-
-
-
-\## Development Progress
-
-
-
-The following development work has been carried out:
-
-
-
-\- Collection and preprocessing of historical landslide records.
-
-\- Extraction and analysis of India-specific landslide events.
-
-\- GIS-based inspection of landslide locations.
-
-\- DEM processing and terrain feature extraction.
-
-\- Generation of elevation, slope, and aspect features.
-
-\- Regional terrain data processing.
-
-\- Pilot background sample generation.
-
-\- Initial training dataset preparation.
-
-\- Rainfall feature processing and analysis.
-
-\- Western Ghats pilot terrain and rainfall analysis.
-
-\- Initial regional machine learning baseline workflows.
-
-\- Preliminary regional risk scoring and GIS visualization workflows.
-
-
-
-\## Current Work
-
-
-
-The project is under active development.
-
-
-
-Current focus areas include:
-
-
-
-\- Regional dataset refinement and validation.
-
-\- Improving rainfall and terrain data reliability.
-
-\- Regional machine learning model development.
-
-\- Satellite rainfall data integration.
-
-\- Development of dynamic GIS-based risk mapping.
-
-
-
-\## Future Development
-
-
-
-Planned features include:
-
-
-
-1\. NASA GPM IMERG satellite rainfall integration.
-
-2\. ISRO INSAT satellite data integration.
-
-3\. Satellite-based terrain and environmental monitoring.
-
-4\. Improved regional landslide prediction models.
-
-5\. Dynamic rainfall-responsive GIS risk maps.
-
-6\. Automated risk updates and monitoring.
-
-7\. Early-warning and alert system.
-
-8\. Frontend and backend integration.
-
-
-
-\## Installation
-
-
-
-Clone the repository:
-
-
-
-```bash
-
-git clone https://github.com/vedantkumbhar/Landslide-Prediction.git
-
-```
-
-
-
-Navigate to the project directory:
-
-
-
-```bash
-
-cd Landslide-Prediction
-
-```
-
-
-
-Create a virtual environment:
-
-
-
-```bash
-
-python -m venv .venv
-
-```
-
-
-
-Activate it on Windows:
-
-
+The standard production refresh can be executed manually using:
 
 ```powershell
-
-.venv\\Scripts\\activate
-
+python -X utf8 -B -m backend.run_standard_refresh
 ```
 
+The workflow includes:
 
+- Pre-flight validation.
+- NASA GPM observation discovery.
+- Rainfall granule retrieval and reuse.
+- Regional processing.
+- Dynamic risk-map generation.
+- GIS output generation.
+- Automated test verification.
+- JSON and Markdown refresh reports.
+- Process locking to prevent overlapping executions.
+- Backup and rollback safeguards.
+- Data freshness and completeness checks.
 
-Install dependencies:
+The configured Windows scheduled task is:
 
+`LandslidePrediction_GPM_Refresh`
 
+The local scheduled task and its configuration are not automatically installed when cloning the GitHub repository.
 
-```bash
+## 8. Technology Stack
 
-pip install -r requirements.txt
+| Category | Technologies |
+|---|---|
+| Programming | Python |
+| Machine Learning | Scikit-learn, Random Forest and regional ML workflows |
+| Data Processing | Pandas, NumPy |
+| Geospatial Processing | Rasterio, GeoPandas, PyProj |
+| Remote Sensing | NASA GPM IMERG |
+| GIS Visualization | Folium, Leaflet, GeoJSON |
+| Data Storage | CSV, JSON, geospatial datasets |
+| Automation | Windows Task Scheduler, Python |
+| Version Control | Git and GitHub |
 
+## 9. Repository Structure
+
+```text
+Landslide-Prediction/
+│
+├── backend/
+│   ├── Regional processing pipelines
+│   ├── GPM rainfall integration
+│   ├── Standard refresh orchestration
+│   ├── Unified GIS dashboard generation
+│   └── Automated validation and tests
+│
+├── gis/
+│   └── GIS and terrain data processing scripts
+│
+├── ml/
+│   └── Machine learning workflows
+│
+├── data/
+│   ├── raw/
+│   └── processed/
+│
+├── outputs/
+│   ├── Regional GIS maps
+│   ├── Unified dynamic risk dashboard
+│   └── Refresh reports
+│
+├── scripts/
+│   └── Automation and utility scripts
+│
+├── requirements.txt
+├── .gitignore
+└── README.md
 ```
 
+*Note: Data files, trained model artifacts, and some local operational files may be excluded from GitHub. The directory overview is illustrative rather than an exhaustive file listing.*
 
+## 10. Installation and Setup
 
-\## Collaboration
+### Prerequisites
 
+- Python 3.11
+- Git
+- Windows PowerShell (for the documented Windows automation workflow)
+- NASA Earthdata credentials for online GPM data retrieval
+- Required project datasets and trained model artifacts
 
+### Step 1: Clone the repository
 
-This repository is used for collaborative development and progress tracking.
+```powershell
+git clone https://github.com/vedantkumbhar/Landslide-Prediction.git
+cd Landslide-Prediction
+```
 
+### Step 2: Create a virtual environment
 
+```powershell
+python -m venv .venv
+```
 
-Project members can:
+### Step 3: Activate the environment
 
+```powershell
+.venv\Scripts\activate
+```
 
+### Step 4: Install dependencies
 
-\- Access the source code.
+```powershell
+python -m pip install -r requirements.txt
+```
 
-\- Review ongoing development.
+### Step 5: Configure NASA Earthdata credentials
 
-\- Contribute improvements.
+Configure the required `NASA_EARTHDATA_TOKEN` in the project's supported environment configuration.
 
-\- Upload updated scripts and reports.
+Do not commit authentication tokens, passwords, or other credentials to GitHub.
 
-\- Track daily development through Git commits.
+### Step 6: Prepare project data
 
+Obtain the required datasets, regional inputs, and trained model artifacts. These are not necessarily included in the public repository.
 
+### Step 7: Run the standard refresh
 
-\## Important Note
+```powershell
+python -X utf8 -B -m backend.run_standard_refresh
+```
 
+A successful run performs the configured validation and processing workflow and generates updated regional outputs, the unified dashboard, and refresh reports.
 
+## 11. Testing and Validation
 
-This project is currently under research and development. Model outputs and risk assessments are experimental and should not be used as the sole basis for real-world disaster management or evacuation decisions.
+The project includes automated tests covering:
 
+- Regional rainfall integration.
+- Terrain susceptibility processing.
+- Dynamic risk assessment.
+- Spatial grid generation.
+- GIS map generation.
+- Unified dashboard generation.
+- Standard refresh orchestration.
+- Data freshness safeguards.
+- Atomic output generation.
+- Backup and rollback safety.
+- Scheduled refresh behavior.
 
+**Latest recorded verification:** 263 automated tests passed across the tested suites, with zero test failures.
 
-\---
+## 12. Current Limitations
 
+The project is a research and development prototype.
 
+Important limitations include:
 
-\*\*Project Status:\*\* Work in Progress
+- Western Ghats coverage is currently limited to pilot areas.
+- GPM rainfall observations have approximately 0.1° native spatial resolution.
+- Risk categories are experimental and are not calibrated probabilities.
+- Rainfall freshness depends on satellite data availability and retrieval.
+- ISRO INSAT integration is not yet implemented.
+- The system is not an officially certified early-warning platform.
+- Availability of the required datasets and model artifacts is necessary to reproduce the complete pipeline.
 
+The system must not be used as the sole basis for evacuation, emergency response, or disaster-management decisions.
 
+## 13. Future Development
 
-\*\*Project:\*\* Landslide Prediction Mega Project
+Planned enhancements include:
 
+1. ISRO INSAT satellite rainfall integration.
+2. Expanded Western Ghats geographical coverage.
+3. Additional satellite-based environmental monitoring.
+4. Improved regional model validation and calibration.
+5. Earthquake-triggered landslide monitoring.
+6. Enhanced early-warning and alert mechanisms.
+7. Further field validation and operational evaluation.
+
+## 14. Project Status
+
+The project has progressed from historical landslide data preparation and terrain analysis to a regional rainfall-responsive monitoring prototype with automated refresh, GIS visualization, and validation safeguards.
+
+The core monitoring pipeline and unified dashboard are implemented. Further development will focus on improving geographical coverage, validation, and satellite data integration.
+
+---
+
+**Project:** Landslide Prediction Mega Project
+**Domain:** Artificial Intelligence, Machine Learning, GIS and Remote Sensing
+**Repository:** [github.com/vedantkumbhar/Landslide-Prediction](https://github.com/vedantkumbhar/Landslide-Prediction)
+
+*Developed as an academic research and engineering project.*
