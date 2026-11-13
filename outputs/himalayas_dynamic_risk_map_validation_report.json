@@ -7,16 +7,16 @@
   "historical_events_count": 556,
   "background_samples_count": 429,
   "total_features_in_point_geojson": 13037,
-  "regional_polygons_count": 1894,
+  "regional_polygons_count": 1933,
   "spatial_cells_count": 12052,
-  "html_size_mb": 8.59,
-  "regions_geojson_size_mb": 4.62,
+  "html_size_mb": 8.64,
+  "regions_geojson_size_mb": 4.68,
   "cells_geojson_size_mb": 16.25,
   "freshness_audit": {
-    "observation_start_utc": "2026-11-12T03:00:00Z",
-    "observation_end_utc": "2026-11-13T03:00:00Z",
-    "map_generation_timestamp_utc": "2026-11-13T08:05:19.765321Z",
-    "calculated_latency_hours": 5.089,
+    "observation_start_utc": "2026-11-12T05:00:00Z",
+    "observation_end_utc": "2026-11-13T05:00:00Z",
+    "map_generation_timestamp_utc": "2026-11-13T10:23:14.714678Z",
+    "calculated_latency_hours": 5.387,
     "max_latency_hours": 12.0,
     "is_stale": false
   },
@@ -31,6 +31,6 @@
     "shared_popup_template_used": true,
     "rfc7946_geojson_valid": true
   },
-  "generation_timestamp_utc": "2026-11-13T08:05:19.765321Z",
+  "generation_timestamp_utc": "2026-11-13T10:23:14.714678Z",
   "disclaimer": "EXPERIMENTAL PROVISIONAL SCREENING ONLY \u2014 NOT AN OFFICIAL WARNING OR CALIBRATED PROBABILITY"
 }

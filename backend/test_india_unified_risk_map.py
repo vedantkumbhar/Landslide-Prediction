@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import re
@@ -29,6 +29,7 @@ from backend.create_india_unified_risk_map import (
     EXPECTED_TOTAL_CELLS,
     EXPECTED_TOTAL_EVENTS,
     generate_india_unified_risk_map,
+    parse_iso8601_utc,
 )
 
 
@@ -45,10 +46,19 @@ class TestIndiaUnifiedRiskMap(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp_dir = Path(tempfile.mkdtemp(prefix="test_unified_india_"))
-        # Deterministic timestamp 6 hours after 2026-11-12T11:00:00Z (well within 12h)
-        self.fresh_now = datetime(2026, 11, 12, 17, 0, 0, tzinfo=timezone.utc)
-        # Deterministic timestamp 18 hours after 2026-11-12T11:00:00Z (exceeds 12h limit)
-        self.stale_now = datetime(2026, 11, 13, 5, 0, 0, tzinfo=timezone.utc)
+        # Read the synchronized observation window directly from metadata
+        meta = json.loads(DEFAULT_HIM_MAP_META.read_text(encoding="utf-8"))
+        obs_meta = meta.get("gpm_observation_metadata") or meta.get("observation_metadata") or {}
+        obs_start_str = obs_meta.get("observation_start_utc", "")
+        obs_end_str = obs_meta.get("observation_end_utc", "")
+        self.expected_obs_start = obs_start_str
+        self.expected_obs_end = obs_end_str
+        obs_end_dt = parse_iso8601_utc(obs_end_str) if obs_end_str else datetime(2026, 11, 12, 11, 0, 0, tzinfo=timezone.utc)
+        self.obs_end_dt = obs_end_dt
+        # Deterministic timestamp 6 hours after observation end (well within 12h)
+        self.fresh_now = obs_end_dt + timedelta(hours=6)
+        # Deterministic timestamp 18 hours after observation end (exceeds 12h limit)
+        self.stale_now = obs_end_dt + timedelta(hours=18)
 
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
@@ -116,8 +126,8 @@ class TestIndiaUnifiedRiskMap(unittest.TestCase):
             "60000",
             "STALE_DATA_UNASSESSED",
             "UNASSESSED (Stale Data)",
-            "2026-11-11T11:00:00Z",
-            "2026-11-12T11:00:00Z",
+            self.expected_obs_start,
+            self.expected_obs_end,
         ):
             self.assertIn(token, html_text)
 
@@ -147,10 +157,11 @@ class TestIndiaUnifiedRiskMap(unittest.TestCase):
 
     def test_03_mismatched_regional_timestamps_rejected(self) -> None:
         """Differing observation_end_utc between regions must be rejected before generating."""
+        bad_ts = (self.obs_end_dt - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
         bad_ne_risk = json.loads(DEFAULT_NE_RISK_META.read_text(encoding="utf-8"))
-        bad_ne_risk["gpm_observation_metadata"]["observation_end_utc"] = "2026-11-12T10:00:00Z"
+        bad_ne_risk["gpm_observation_metadata"]["observation_end_utc"] = bad_ts
         bad_ne_map = json.loads(DEFAULT_NE_MAP_META.read_text(encoding="utf-8"))
-        bad_ne_map["gpm_observation_metadata"]["observation_end_utc"] = "2026-11-12T10:00:00Z"
+        bad_ne_map["gpm_observation_metadata"]["observation_end_utc"] = bad_ts
 
         bad_risk_path = self.tmp_dir / "ne_risk_bad.json"
         bad_map_path = self.tmp_dir / "ne_map_bad.json"

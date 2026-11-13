@@ -10,14 +10,14 @@
   "regional_polygons": {
     "dynamic_hazard_screening_regions": 1478,
     "terrain_susceptibility_regions": 1081,
-    "rainfall_contribution_regions": 28,
+    "rainfall_contribution_regions": 27,
     "total_cells_covered": 4819,
     "all_geometries_valid": true
   },
   "layers": {
     "dynamic_hazard_screening": 1478,
     "terrain_susceptibility": 1081,
-    "rainfall_contribution": 28,
+    "rainfall_contribution": 27,
     "spatial_grid_cells_5km": 4819,
     "historical_landslide_events": 182,
     "validated_background_samples": 1400
@@ -31,18 +31,18 @@
   },
   "output_files": {
     "html_map": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_map.html",
-    "html_size_bytes": 4656307,
+    "html_size_bytes": 4654754,
     "regions_geojson": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_regions.geojson",
-    "regions_geojson_size_bytes": 3577156,
+    "regions_geojson_size_bytes": 3577194,
     "cells_geojson": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_5km_spatial_cells.geojson",
-    "cells_geojson_size_bytes": 6901159,
+    "cells_geojson_size_bytes": 6901865,
     "point_geojson": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_hazard_risk.geojson",
-    "point_geojson_size_bytes": 5963709
+    "point_geojson_size_bytes": 5964023
   },
   "observation_metadata": {
-    "observation_start_utc": "2026-11-12T03:00:00Z",
-    "observation_end_utc": "2026-11-13T03:00:00Z",
-    "latency_hours": 5.09,
+    "observation_start_utc": "2026-11-12T05:00:00Z",
+    "observation_end_utc": "2026-11-13T05:00:00Z",
+    "latency_hours": 5.39,
     "max_latency_hours_allowed": 12.0,
     "is_fresh": true,
     "status": "SUCCESS"
@@ -52,6 +52,6 @@
     "P80_moderate_to_high": 19.491061000000002,
     "P95_high_to_very_high": 30.61163834999998
   },
-  "generation_timestamp_utc": "2026-11-13T08:05:19.765321Z",
+  "generation_timestamp_utc": "2026-11-13T10:23:14.714678Z",
   "disclaimer": "Limited Western Ghats Pilot across 14 validated DEM tiles only (4,819 5 km grid cells, 182 historical landslide events, 1,400 background samples); does not imply complete Western Ghats coverage. EXPERIMENTAL_PROVISIONAL_WESTERN_GHATS_LIMITED_PILOT_14_TILES_ONLY_NOT_OFFICIAL_WARNING."
 }

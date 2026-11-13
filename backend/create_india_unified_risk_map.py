@@ -619,8 +619,13 @@ def _build_dashboard_legend_html(
     map_name: str,
     layer_names: Dict[str, Dict[str, str]],
 ) -> str:
-    """Build the unified India dashboard card with per-region legends, controls, links & disclosures."""
+    """Build the premium geospatial command-center layout: Top Telemetry Bar, Left Command Sidebar & Right Analytics Drawer."""
     region_cards_html: List[str] = []
+    accent_colors = {
+        "himalayas": "#38bdf8",      # Cyan
+        "northeast": "#10b981",      # Emerald
+        "western_ghats": "#c084fc",  # Purple
+    }
     for rkey in ("himalayas", "northeast", "western_ghats"):
         cfg = REGION_DISPLAY_CONFIG[rkey]
         cuts = region_cutoffs[rkey]
@@ -628,126 +633,431 @@ def _build_dashboard_legend_html(
         p50 = cuts["P50_low_to_moderate"]
         p80 = cuts["P80_moderate_to_high"]
         p95 = cuts["P95_high_to_very_high"]
-        lnames = layer_names[rkey]
+        accent = accent_colors.get(rkey, cfg["badge_color"])
         pilot_tag = (
-            '<span style="background:#7d3c98; color:white; padding:1px 5px; border-radius:3px; '
-            'font-size:9px; margin-left:4px;">14 TILES PILOT</span>'
+            '<span style="background:rgba(192,132,252,0.25); color:#e9d5ff; border:1px solid rgba(192,132,252,0.45); padding:1px 6px; border-radius:3px; '
+            'font-size:8.5px; font-weight:700; margin-left:5px; text-transform:uppercase;">14 TILES PILOT</span>'
             if cfg["is_limited_pilot"]
             else ""
         )
         region_cards_html.append(
             f"""
-            <div style="border:1px solid #d5dbdb; border-left:4px solid {cfg['badge_color']};
-                        border-radius:5px; padding:6px 8px; margin-bottom:6px; background:#fdfefe;">
+            <div style="border:1px solid rgba(56, 189, 248, 0.18); border-left:4px solid {accent};
+                        border-radius:6px; padding:7px 9px; margin-bottom:7px; background:rgba(30, 41, 59, 0.70);">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
-                    <span style="font-weight:bold; font-size:11.5px; color:#1a252f;">
+                    <span style="font-weight:700; font-size:11.8px; color:#f8fafc;">
                         {safe_html(cfg['display_name'])}{pilot_tag}
                     </span>
-                    <span style="display:flex; gap:5px; align-items:center;">
-                        <a href="javascript:void(0)" onclick="window.zoomToUnifiedRegion('{rkey}')"
-                           style="font-size:10px; color:#1b4f72; text-decoration:none; font-weight:bold;
-                                  border:1px solid #aed6f1; padding:1px 5px; border-radius:3px; background:#ebf5fb;">
+                    <span style="display:flex; gap:4px; align-items:center;">
+                        <button type="button" onclick="window.zoomToUnifiedRegion('{rkey}')"
+                                style="font-size:9.5px; color:#38bdf8; font-weight:600; cursor:pointer;
+                                       border:1px solid rgba(56, 189, 248, 0.4); padding:1px 6px; border-radius:3px; background:rgba(56, 189, 248, 0.12);">
                            Focus
-                        </a>
+                        </button>
                         <a href="{safe_html(cfg['regional_map_href'])}" target="_blank" rel="noopener noreferrer"
-                           style="font-size:10px; color:#145a32; text-decoration:none; font-weight:bold;
-                                  border:1px solid #a9dfbf; padding:1px 5px; border-radius:3px; background:#eafaf1;">
+                           style="font-size:9.5px; color:#34d399; text-decoration:none; font-weight:600;
+                                  border:1px solid rgba(16, 185, 129, 0.4); padding:1px 6px; border-radius:3px; background:rgba(16, 185, 129, 0.12);">
                            Regional Map &nearr;
                         </a>
                     </span>
                 </div>
-                <div style="font-size:9.8px; color:#566573; margin-bottom:4px;">
+                <div style="font-size:9.5px; color:#94a3b8; margin-bottom:4px;">
                     {safe_html(cfg['scope_note'])} · Events: {EXPECTED_COUNTS[rkey]['events']:,} · BG: {EXPECTED_COUNTS[rkey]['background']:,}
                 </div>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:2px 6px; font-size:9.8px; margin-bottom:4px;">
-                    <div><span style="display:inline-block;width:9px;height:9px;background:{CATEGORY_COLORS['Low']};border-radius:2px;margin-right:4px;"></span>Low (&lt;{p50:.2f}): <b>{counts['Low']:,}</b></div>
-                    <div><span style="display:inline-block;width:9px;height:9px;background:{CATEGORY_COLORS['Moderate']};border-radius:2px;margin-right:4px;"></span>Mod ({p50:.2f}–{p80:.2f}): <b>{counts['Moderate']:,}</b></div>
-                    <div><span style="display:inline-block;width:9px;height:9px;background:{CATEGORY_COLORS['High']};border-radius:2px;margin-right:4px;"></span>High ({p80:.2f}–{p95:.2f}): <b>{counts['High']:,}</b></div>
-                    <div><span style="display:inline-block;width:9px;height:9px;background:{CATEGORY_COLORS['Very High']};border-radius:2px;margin-right:4px;"></span>Very High (&ge;{p95:.2f}): <b>{counts['Very High']:,}</b></div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:2px 6px; font-size:9.5px; margin-bottom:5px; background:rgba(15, 23, 42, 0.6); padding:4px 6px; border-radius:4px;">
+                    <div><span style="display:inline-block;width:8px;height:8px;background:{CATEGORY_COLORS['Low']};border-radius:2px;margin-right:4px;"></span>Low (&lt;{p50:.2f}): <b style="color:#f8fafc;">{counts['Low']:,}</b></div>
+                    <div><span style="display:inline-block;width:8px;height:8px;background:{CATEGORY_COLORS['Moderate']};border-radius:2px;margin-right:4px;"></span>Mod ({p50:.2f}–{p80:.2f}): <b style="color:#f8fafc;">{counts['Moderate']:,}</b></div>
+                    <div><span style="display:inline-block;width:8px;height:8px;background:{CATEGORY_COLORS['High']};border-radius:2px;margin-right:4px;"></span>High ({p80:.2f}–{p95:.2f}): <b style="color:#f8fafc;">{counts['High']:,}</b></div>
+                    <div><span style="display:inline-block;width:8px;height:8px;background:{CATEGORY_COLORS['Very High']};border-radius:2px;margin-right:4px;"></span>Very High (&ge;{p95:.2f}): <b style="color:#f8fafc;">{counts['Very High']:,}</b></div>
                 </div>
-                <div style="display:flex; gap:8px; font-size:9.8px; border-top:1px dashed #e5e8e8; padding-top:3px;">
-                    <label style="cursor:pointer;"><input type="checkbox" id="chk_{rkey}_cells" checked onchange="window.toggleUnifiedLayer('{rkey}','cells',this.checked)"> Cells</label>
-                    <label style="cursor:pointer;"><input type="checkbox" id="chk_{rkey}_events" checked onchange="window.toggleUnifiedLayer('{rkey}','events',this.checked)"> Events</label>
-                    <label style="cursor:pointer;"><input type="checkbox" id="chk_{rkey}_bg" onchange="window.toggleUnifiedLayer('{rkey}','bg',this.checked)"> Background</label>
+                <div style="display:flex; gap:10px; font-size:9.5px; border-top:1px solid rgba(255,255,255,0.08); padding-top:4px; color:#cbd5e1;">
+                    <label style="cursor:pointer; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="chk_{rkey}_cells" checked onchange="window.toggleUnifiedLayer('{rkey}','cells',this.checked)"> Cells</label>
+                    <label style="cursor:pointer; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="chk_{rkey}_events" checked onchange="window.toggleUnifiedLayer('{rkey}','events',this.checked)"> Events</label>
+                    <label style="cursor:pointer; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="chk_{rkey}_bg" onchange="window.toggleUnifiedLayer('{rkey}','bg',this.checked)"> Background</label>
                 </div>
             </div>
             """.strip()
         )
 
     cards_joined = "\n".join(region_cards_html)
-    _ = (map_name, lnames)
+    _ = (map_name, layer_names)
+
     return f"""
-    <div id="india-unified-panel" style="position:fixed; bottom:18px; left:18px; width:385px;
-                max-height:calc(100vh - 38px); overflow-y:auto;
-                background-color:rgba(255,255,255,0.96);
-                border:2px solid #2c3e50; border-radius:8px;
-                z-index:9999; font-size:11px; font-family:Arial,sans-serif;
-                box-shadow:0 4px 16px rgba(0,0,0,0.28);
-                padding:10px 12px; line-height:1.38; color:#2c3e50;">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start;
-                    border-bottom:2px solid #34495e; padding-bottom:5px; margin-bottom:7px;">
+    <style>
+        :root {{
+            --cc-bg-nav: rgba(11, 19, 43, 0.94);
+            --cc-bg-panel: rgba(15, 23, 42, 0.92);
+            --cc-bg-card: rgba(30, 41, 59, 0.70);
+            --cc-border: rgba(56, 189, 248, 0.22);
+            --cc-cyan: #38bdf8;
+            --cc-emerald: #10b981;
+            --cc-purple: #c084fc;
+            --cc-text-light: #f8fafc;
+            --cc-text-muted: #94a3b8;
+        }}
+
+        #unified-top-bar {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 52px;
+            background: var(--cc-bg-nav);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--cc-border);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: var(--cc-text-light);
+            box-sizing: border-box;
+        }}
+
+        .top-brand {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }}
+
+        .radar-dot {{
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: #38bdf8;
+            box-shadow: 0 0 10px #38bdf8;
+            animation: pulse-dot 2.2s infinite;
+        }}
+
+        @keyframes pulse-dot {{
+            0% {{ transform: scale(0.9); box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.8); }}
+            70% {{ transform: scale(1); box-shadow: 0 0 0 7px rgba(56, 189, 248, 0); }}
+            100% {{ transform: scale(0.9); box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }}
+        }}
+
+        .top-title {{
+            font-size: 14px;
+            font-weight: 800;
+            letter-spacing: 1.2px;
+            color: #ffffff;
+            text-transform: uppercase;
+        }}
+
+        .top-sub {{
+            font-size: 9px;
+            color: var(--cc-text-muted);
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+        }}
+
+        .status-pill {{
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.45);
+            color: #34d399;
+            font-size: 9.5px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 12px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            letter-spacing: 0.4px;
+        }}
+
+        .top-center {{
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: rgba(30, 41, 59, 0.55);
+            border: 1px solid var(--cc-border);
+            padding: 3px 12px;
+            border-radius: 6px;
+        }}
+
+        .top-center-label {{
+            font-size: 8.5px;
+            font-weight: 700;
+            color: var(--cc-cyan);
+            letter-spacing: 0.6px;
+            text-transform: uppercase;
+        }}
+
+        .top-center-val {{
+            font-size: 11px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-weight: 600;
+            color: #f1f5f9;
+        }}
+
+        .top-right {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 10.5px;
+        }}
+
+        #live-utc-clock {{
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 10.5px;
+            color: var(--cc-cyan);
+            background: rgba(56, 189, 248, 0.12);
+            border: 1px solid rgba(56, 189, 248, 0.28);
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-weight: 600;
+        }}
+
+        /* Left Sidebar & Right Drawer */
+        #india-unified-panel, #unified-right-panel {{
+            background: var(--cc-bg-panel);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid var(--cc-border);
+            border-radius: 8px;
+            box-shadow: 0 12px 36px rgba(0,0,0,0.65);
+            color: var(--cc-text-light);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 11px;
+            line-height: 1.4;
+            box-sizing: border-box;
+        }}
+
+        #india-unified-panel {{
+            position: fixed;
+            top: 64px;
+            left: 16px;
+            width: 345px;
+            max-height: calc(100vh - 80px);
+            overflow-y: auto;
+            z-index: 9998;
+            padding: 10px 12px;
+        }}
+
+        #unified-right-panel {{
+            position: fixed;
+            top: 64px;
+            right: 16px;
+            width: 325px;
+            max-height: calc(100vh - 80px);
+            overflow-y: auto;
+            z-index: 9998;
+            padding: 10px 12px;
+        }}
+
+        /* Scrollbars */
+        #india-unified-panel::-webkit-scrollbar,
+        #unified-right-panel::-webkit-scrollbar {{
+            width: 5px;
+        }}
+        #india-unified-panel::-webkit-scrollbar-track,
+        #unified-right-panel::-webkit-scrollbar-track {{
+            background: rgba(15, 23, 42, 0.6);
+        }}
+        #india-unified-panel::-webkit-scrollbar-thumb,
+        #unified-right-panel::-webkit-scrollbar-thumb {{
+            background: rgba(56, 189, 248, 0.35);
+            border-radius: 3px;
+        }}
+
+        /* Leaflet Controls Dark Theme */
+        .leaflet-control-layers {{
+            background: rgba(15, 23, 42, 0.92) !important;
+            border: 1px solid rgba(56, 189, 248, 0.25) !important;
+            color: #e2e8f0 !important;
+            border-radius: 6px !important;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.55) !important;
+            backdrop-filter: blur(10px) !important;
+        }}
+        .leaflet-control-layers-expanded {{
+            padding: 8px 12px !important;
+            font-size: 11px !important;
+        }}
+        .leaflet-control-zoom a {{
+            background: rgba(15, 23, 42, 0.92) !important;
+            color: #38bdf8 !important;
+            border: 1px solid rgba(56, 189, 248, 0.25) !important;
+        }}
+        .leaflet-control-zoom a:hover {{
+            background: rgba(56, 189, 248, 0.25) !important;
+            color: #ffffff !important;
+        }}
+        .leaflet-container {{
+            background: #080d1a !important;
+        }}
+        .leaflet-popup-content-wrapper {{
+            background: #0f172a !important;
+            color: #e2e8f0 !important;
+            border: 1px solid rgba(56, 189, 248, 0.35) !important;
+            border-radius: 8px !important;
+            box-shadow: 0 12px 32px rgba(0,0,0,0.7) !important;
+        }}
+        .leaflet-popup-tip {{
+            background: #0f172a !important;
+        }}
+    </style>
+
+    <header id="unified-top-bar">
+        <div class="top-brand">
+            <span class="radar-dot"></span>
             <div>
-                <div style="font-weight:bold; font-size:13px; color:#1a252f;">
-                    India Unified Dynamic Landslide Risk Screening
+                <div class="top-title">LANDSLIDE INDIA</div>
+                <div class="top-sub">Geospatial Intelligence Platform</div>
+            </div>
+            <span class="status-pill"><span style="width:6px;height:6px;border-radius:50%;background:#10b981;display:inline-block;"></span>OPERATIONAL</span>
+        </div>
+
+        <div class="top-center">
+            <span class="top-center-label">NASA GPM IMERG V07C (24H WINDOW)</span>
+            <span class="top-center-val">{safe_html(obs_start_utc)} &rarr; {safe_html(obs_end_utc)}</span>
+        </div>
+
+        <div class="top-right">
+            <div>
+                <span id="dashboard-latency-text" style="color:#cbd5e1; font-size:10.5px;">{latency_hours:.1f} hours (FRESH, limit: {max_latency_hours:.1f}h)</span>
+            </div>
+            <span id="dashboard-freshness-badge" style="background:#27ae60; color:#ffffff; padding:2px 8px; border-radius:4px; font-size:9.5px; font-weight:700; letter-spacing:0.4px; text-transform:uppercase;">FRESH (OPERATIONAL)</span>
+            <span id="live-utc-clock">--:--:-- UTC</span>
+            <span style="font-size:9px; color:#64748b;" title="Refresh Run Generation UTC">Gen: {safe_html(gen_ts_utc)}</span>
+        </div>
+    </header>
+
+    <div id="india-unified-panel">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px solid rgba(56, 189, 248, 0.22); padding-bottom:5px; margin-bottom:7px;">
+            <div>
+                <div style="font-weight:700; font-size:12px; color:#f8fafc; text-transform:uppercase; letter-spacing:0.8px;">
+                    Regional Command & Layers
                 </div>
-                <div style="font-size:10px; color:#1b4f72; font-weight:bold;">
+                <div style="font-size:9.5px; color:#38bdf8; font-weight:600;">
                     {EXPECTED_TOTAL_CELLS:,} Grid Cells (5 km) · {EXPECTED_TOTAL_EVENTS:,} Events · {EXPECTED_TOTAL_BACKGROUND:,} Background Samples
                 </div>
             </div>
-            <button type="button" onclick="var b=document.getElementById('unified-panel-body'); b.style.display=(b.style.display==='none'?'block':'none'); this.textContent=(b.style.display==='none'?'Expand':'Hide');"
-                    style="font-size:10px; padding:2px 6px; border:1px solid #bdc3c7; border-radius:4px; background:#f8f9fa; cursor:pointer;">
-                Hide
+            <button type="button" onclick="var b=document.getElementById('unified-panel-body'); b.style.display=(b.style.display==='none'?'block':'none'); this.textContent=(b.style.display==='none'?'Expand':'Collapse');"
+                    style="font-size:9.5px; padding:2px 7px; border:1px solid rgba(56, 189, 248, 0.3); border-radius:4px; background:rgba(30, 41, 59, 0.8); color:#38bdf8; cursor:pointer;">
+                Collapse
             </button>
         </div>
 
         <div id="unified-panel-body">
-            <div style="background:#fef9e7; border:1px solid #f7dc6f; border-radius:4px; padding:5px 7px; margin-bottom:7px; font-size:9.8px; color:#7d6608;">
+            <div style="background:rgba(234, 179, 8, 0.12); border:1px solid rgba(234, 179, 8, 0.35); border-radius:5px; padding:6px 8px; margin-bottom:7px; font-size:9.5px; color:#fef08a; line-height:1.35;">
                 <b>Separate Regional Thresholds:</b> Categories use each region's own P50 / P80 / P95 quantiles. Do not compare numerical scores across regions as a universal national scale.
             </div>
 
             <div style="display:flex; gap:5px; flex-wrap:wrap; margin-bottom:7px;">
                 <button type="button" onclick="window.zoomToUnifiedRegion('india')"
-                        style="font-size:10px; padding:2px 7px; border:1px solid #2c3e50; border-radius:4px; background:#2c3e50; color:white; cursor:pointer;">
+                        style="font-size:10px; font-weight:600; padding:3px 9px; border:1px solid #38bdf8; border-radius:4px; background:rgba(56, 189, 248, 0.2); color:#38bdf8; cursor:pointer;">
                     India View
                 </button>
                 <button type="button" onclick="window.setAllCategoryLayers('cells', true)"
-                        style="font-size:10px; padding:2px 6px; border:1px solid #85929e; border-radius:4px; background:#f4f6f7; cursor:pointer;">
+                        style="font-size:10px; padding:3px 7px; border:1px solid rgba(255,255,255,0.2); border-radius:4px; background:rgba(30, 41, 59, 0.8); color:#f8fafc; cursor:pointer;">
                     All Cells
                 </button>
                 <button type="button" onclick="window.setAllCategoryLayers('events', true)"
-                        style="font-size:10px; padding:2px 6px; border:1px solid #8e44ad; border-radius:4px; background:#f5eef8; cursor:pointer;">
+                        style="font-size:10px; padding:3px 7px; border:1px solid rgba(192, 132, 252, 0.4); border-radius:4px; background:rgba(192, 132, 252, 0.15); color:#e9d5ff; cursor:pointer;">
                     All Events
                 </button>
                 <button type="button" onclick="window.setAllCategoryLayers('bg', true)"
-                        style="font-size:10px; padding:2px 6px; border:1px solid #16a085; border-radius:4px; background:#e8f8f5; cursor:pointer;">
+                        style="font-size:10px; padding:3px 7px; border:1px solid rgba(16, 185, 129, 0.4); border-radius:4px; background:rgba(16, 185, 129, 0.15); color:#a7f3d0; cursor:pointer;">
                     Show BG
                 </button>
                 <button type="button" onclick="window.setAllCategoryLayers('bg', false)"
-                        style="font-size:10px; padding:2px 6px; border:1px solid #95a5a6; border-radius:4px; background:#f4f6f7; cursor:pointer;">
+                        style="font-size:10px; padding:3px 7px; border:1px solid rgba(255,255,255,0.15); border-radius:4px; background:rgba(30, 41, 59, 0.6); color:#94a3b8; cursor:pointer;">
                     Hide BG
                 </button>
             </div>
 
             {cards_joined}
 
-            <div style="display:flex; gap:10px; align-items:center; font-size:10px; margin:4px 0 6px 0; color:#34495e;">
+            <div style="display:flex; gap:10px; align-items:center; font-size:9.5px; margin:5px 0 6px 0; color:#cbd5e1; flex-wrap:wrap;">
                 <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#8e44ad;border:1px solid #fff;box-shadow:0 0 0 1px #8e44ad;margin-right:4px;"></span>Historical Events ({EXPECTED_TOTAL_EVENTS:,})</span>
                 <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#16a085;border:1px solid #0e6251;margin-right:4px;"></span>Background Samples ({EXPECTED_TOTAL_BACKGROUND:,})</span>
                 <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:{CATEGORY_COLORS['UNASSESSED_MISSING_RAINFALL']};margin-right:4px;"></span>Unassessed (&gt;12h)</span>
             </div>
+        </div>
+    </div>
 
-            <div style="border-top:1px solid #e0e0e0; padding-top:5px; font-size:10px; color:#555;">
-                <div><b>Observation Window:</b> {safe_html(obs_start_utc)} to {safe_html(obs_end_utc)}</div>
-                <div><b>Rainfall Latency:</b> <span id="dashboard-latency-text">{latency_hours:.1f} hours (FRESH, limit: {max_latency_hours:.1f}h)</span></div>
-                <div><b>Freshness Status:</b> <span id="dashboard-freshness-badge" style="background:#27ae60; color:white; padding:1px 6px; border-radius:3px; font-size:9.8px; font-weight:bold;">FRESH (OPERATIONAL)</span></div>
-                <div><b>Generated (UTC):</b> {safe_html(gen_ts_utc)}</div>
+    <div id="unified-right-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(56, 189, 248, 0.22); padding-bottom:5px; margin-bottom:7px;">
+            <div>
+                <div style="font-weight:700; font-size:12px; color:#f8fafc; text-transform:uppercase; letter-spacing:0.8px;">
+                    National Telemetry & Analytics
+                </div>
+                <div style="font-size:9.5px; color:#94a3b8;">
+                    GPM IMERG V07C Satellite Screening
+                </div>
+            </div>
+            <button type="button" onclick="var b=document.getElementById('unified-right-body'); b.style.display=(b.style.display==='none'?'block':'none'); this.textContent=(b.style.display==='none'?'Expand':'Collapse');"
+                    style="font-size:9.5px; padding:2px 7px; border:1px solid rgba(56, 189, 248, 0.3); border-radius:4px; background:rgba(30, 41, 59, 0.8); color:#38bdf8; cursor:pointer;">
+                Collapse
+            </button>
+        </div>
+
+        <div id="unified-right-body">
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:8px;">
+                <div style="background:rgba(30, 41, 59, 0.8); border:1px solid rgba(56, 189, 248, 0.2); border-radius:5px; padding:6px 4px; text-align:center;">
+                    <div style="font-size:14px; font-weight:800; color:#38bdf8;">{EXPECTED_TOTAL_CELLS:,}</div>
+                    <div style="font-size:8.5px; color:#94a3b8; text-transform:uppercase; letter-spacing:0.3px;">5 km Cells</div>
+                </div>
+                <div style="background:rgba(30, 41, 59, 0.8); border:1px solid rgba(192, 132, 252, 0.25); border-radius:5px; padding:6px 4px; text-align:center;">
+                    <div style="font-size:14px; font-weight:800; color:#c084fc;">{EXPECTED_TOTAL_EVENTS:,}</div>
+                    <div style="font-size:8.5px; color:#94a3b8; text-transform:uppercase; letter-spacing:0.3px;">Events</div>
+                </div>
+                <div style="background:rgba(30, 41, 59, 0.8); border:1px solid rgba(16, 185, 129, 0.25); border-radius:5px; padding:6px 4px; text-align:center;">
+                    <div style="font-size:14px; font-weight:800; color:#34d399;">{EXPECTED_TOTAL_BACKGROUND:,}</div>
+                    <div style="font-size:8.5px; color:#94a3b8; text-transform:uppercase; letter-spacing:0.3px;">BG Samples</div>
+                </div>
             </div>
 
-            <div style="border-top:1px solid #e0e0e0; padding-top:5px; margin-top:5px; font-size:9.5px; color:#5d6d7e; background:#f9ebea; border:1px solid #f5b7b1; padding:4px 6px; border-radius:4px; margin-bottom:4px;">
+            <div style="background:rgba(30, 41, 59, 0.6); border:1px solid rgba(56, 189, 248, 0.15); border-radius:6px; padding:6px 8px; margin-bottom:7px;">
+                <div style="font-size:9.8px; font-weight:700; color:#f8fafc; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.4px;">
+                    Regional Monitored Coverage
+                </div>
+                <div style="font-size:9.5px; color:#cbd5e1; line-height:1.5;">
+                    <div style="display:flex; justify-content:space-between;"><span>Indian Himalayas:</span> <b>12,052 cells (29 tiles)</b></div>
+                    <div style="display:flex; justify-content:space-between;"><span>Northeast India:</span> <b>14,550 cells (33 tiles)</b></div>
+                    <div style="display:flex; justify-content:space-between;"><span>Western Ghats Pilot:</span> <b>4,819 cells (14 tiles pilot)</b></div>
+                </div>
+            </div>
+
+            <div style="background:rgba(30, 41, 59, 0.6); border:1px solid rgba(56, 189, 248, 0.15); border-radius:6px; padding:6px 8px; margin-bottom:7px;">
+                <div style="font-size:9.8px; font-weight:700; color:#f8fafc; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.4px;">
+                    Standalone Regional Maps Hub
+                </div>
+                <div style="display:flex; flex-direction:column; gap:4px;">
+                    <a href="himalayas_dynamic_risk_map.html" target="_blank" rel="noopener noreferrer"
+                       style="display:flex; justify-content:space-between; align-items:center; font-size:9.5px; color:#38bdf8; text-decoration:none; background:rgba(15, 23, 42, 0.7); border:1px solid rgba(56, 189, 248, 0.25); border-radius:4px; padding:3px 6px;">
+                        <span>Indian Himalayas GIS Map</span> <span>&nearr;</span>
+                    </a>
+                    <a href="northeast_india_dynamic_risk_map.html" target="_blank" rel="noopener noreferrer"
+                       style="display:flex; justify-content:space-between; align-items:center; font-size:9.5px; color:#34d399; text-decoration:none; background:rgba(15, 23, 42, 0.7); border:1px solid rgba(16, 185, 129, 0.25); border-radius:4px; padding:3px 6px;">
+                        <span>Northeast India GIS Map</span> <span>&nearr;</span>
+                    </a>
+                    <a href="western_ghats_dynamic_risk_map.html" target="_blank" rel="noopener noreferrer"
+                       style="display:flex; justify-content:space-between; align-items:center; font-size:9.5px; color:#c084fc; text-decoration:none; background:rgba(15, 23, 42, 0.7); border:1px solid rgba(192, 132, 252, 0.25); border-radius:4px; padding:3px 6px;">
+                        <span>Western Ghats Pilot GIS Map</span> <span>&nearr;</span>
+                    </a>
+                </div>
+            </div>
+
+            <div style="background:rgba(30, 41, 59, 0.6); border:1px solid rgba(56, 189, 248, 0.15); border-radius:6px; padding:6px 8px; margin-bottom:7px; font-size:9.5px; color:#94a3b8;">
+                <div style="font-size:9.8px; font-weight:700; color:#f8fafc; margin-bottom:3px; text-transform:uppercase; letter-spacing:0.4px;">
+                    Observation Window & Latency
+                </div>
+                <div><b>Window:</b> {safe_html(obs_start_utc)} to {safe_html(obs_end_utc)}</div>
+                <div><b>Sensor:</b> NASA GPM IMERG Late Run V07C (24h)</div>
+                <div><b>Latency Guard:</b> Max {max_latency_hours:.1f}h allowed</div>
+            </div>
+
+            <div style="background:rgba(192, 132, 252, 0.12); border:1px solid rgba(192, 132, 252, 0.35); border-radius:5px; padding:5px 7px; margin-bottom:5px; font-size:9.5px; color:#e9d5ff; line-height:1.35;">
                 <b>Western Ghats Limited Pilot Disclosure:</b> Covers strictly 14 validated DEM tiles (4,819 cells, 182 events, 1,400 background samples); does not imply complete Western Ghats coverage.
             </div>
-            <div style="font-size:9.3px; color:#7f8c8d; background:#fff8e1; border:1px solid #ffe082; padding:4px 6px; border-radius:4px;">
+            <div style="background:rgba(239, 68, 68, 0.12); border:1px solid rgba(239, 68, 68, 0.35); border-radius:5px; padding:5px 7px; font-size:9.5px; color:#fca5a5; line-height:1.35;">
                 <b>Disclaimer:</b> EXPERIMENTAL PROVISIONAL SCREENING ONLY — NOT AN OFFICIAL WARNING OR CALIBRATED PROBABILITY.
+            </div>
+            <div style="font-size:9px; color:#64748b; margin-top:4px; text-align:center;">
+                Do not compare numerical scores across regions as a universal national scale.
             </div>
         </div>
     </div>
@@ -846,7 +1156,7 @@ def _build_client_script(
         var statusStr = isStale ? 'STALE_DATA_UNASSESSED' : 'FRESH';
         var latencyStr = (currentLatencyHours !== null && !isNaN(currentLatencyHours)) ? currentLatencyHours.toFixed(1) + 'h latency' : 'latency unavailable';
         var pilotHtml = meta.pilot
-            ? '<div style="font-size:9.5px; color:#7d3c98; background:#f5eef8; border:1px solid #d2b4de; padding:4px 6px; border-radius:4px; margin-bottom:5px;"><b>Western Ghats Limited Pilot:</b> 14 validated DEM tiles only; does not imply complete Western Ghats coverage.</div>'
+            ? '<div style="font-size:9.5px; color:#e9d5ff; background:rgba(192, 132, 252, 0.15); border:1px solid rgba(192, 132, 252, 0.35); padding:4px 6px; border-radius:4px; margin-bottom:5px;"><b>Western Ghats Limited Pilot:</b> 14 validated DEM tiles only; does not imply complete Western Ghats coverage.</div>'
             : '';
         var gpmProxy = {{
             gpm_1h_accumulation_mean_mm: row[7],
@@ -855,28 +1165,28 @@ def _build_client_script(
             gpm_12h_accumulation_mean_mm: row[10],
             gpm_24h_accumulation_mean_mm: row[11]
         }};
-        return '<div style="font-family:Arial,sans-serif; font-size:12px; width:335px; line-height:1.42; color:#2c3e50;">' +
+        return '<div style="font-family:system-ui, -apple-system, sans-serif; font-size:11.5px; width:335px; line-height:1.42; color:#e2e8f0; background:#0f172a; padding:2px;">' +
             '<div style="border-bottom:2px solid ' + badgeColor + '; padding-bottom:5px; margin-bottom:7px;">' +
                 '<div style="display:flex; justify-content:space-between; align-items:center;">' +
-                    '<span style="font-size:13.5px; font-weight:bold; color:#1a252f;">' + escapeHtml(row[1]) + '</span>' +
-                    '<span style="background:' + badgeColor + '; color:white; padding:2px 8px; border-radius:12px; font-weight:bold; font-size:11px;">' + catName + ' Risk</span>' +
+                    '<span style="font-size:13px; font-weight:700; color:#ffffff;">' + escapeHtml(row[1]) + '</span>' +
+                    '<span style="background:' + badgeColor + '; color:white; padding:2px 8px; border-radius:12px; font-weight:700; font-size:10.5px; letter-spacing:0.3px;">' + catName + ' Risk</span>' +
                 '</div>' +
-                '<div style="font-size:10.5px; color:#566573; margin-top:2px;"><b>Region:</b> ' + escapeHtml(meta.name) + ' · Tile <b>' + escapeHtml(row[2]) + '</b></div>' +
+                '<div style="font-size:10px; color:#94a3b8; margin-top:2px;"><b>Region:</b> ' + escapeHtml(meta.name) + ' · Tile <b>' + escapeHtml(row[2]) + '</b></div>' +
             '</div>' +
             pilotHtml +
-            '<table style="width:100%; border-collapse:collapse; margin-bottom:7px; font-size:11px;">' +
-                '<tr><td style="color:#7f8c8d;">Coordinates:</td><td style="font-weight:bold; text-align:right;">' + formatVal(row[16], '°N', 4) + ', ' + formatVal(row[17], '°E', 4) + '</td></tr>' +
-                '<tr><td style="color:#7f8c8d;">Elevation / Slope:</td><td style="font-weight:bold; text-align:right;">' + formatVal(row[12], 'm', 1) + ' / ' + formatVal(row[13], '°', 1) + '</td></tr>' +
-                '<tr><td style="color:#7f8c8d;">Regional Dynamic Risk Index:</td><td style="font-weight:bold; text-align:right; color:' + badgeColor + ';">' + riskStr + '</td></tr>' +
-                '<tr><td style="color:#7f8c8d;">Terrain / Rain Component:</td><td style="font-weight:bold; text-align:right;">' + formatVal(row[5], 'pts', 2) + ' / ' + rcontribStr + '</td></tr>' +
-                '<tr><td style="color:#7f8c8d;">RF Terrain Prob / Baseline Tier:</td><td style="font-weight:bold; text-align:right;">' + formatVal(row[14], null, 3) + ' (' + escapeHtml(row[15]) + ')</td></tr>' +
+            '<table style="width:100%; border-collapse:collapse; margin-bottom:7px; font-size:10.5px;">' +
+                '<tr><td style="color:#94a3b8;">Coordinates:</td><td style="font-weight:600; text-align:right; color:#f1f5f9;">' + formatVal(row[16], '°N', 4) + ', ' + formatVal(row[17], '°E', 4) + '</td></tr>' +
+                '<tr><td style="color:#94a3b8;">Elevation / Slope:</td><td style="font-weight:600; text-align:right; color:#f1f5f9;">' + formatVal(row[12], 'm', 1) + ' / ' + formatVal(row[13], '°', 1) + '</td></tr>' +
+                '<tr><td style="color:#94a3b8;">Regional Dynamic Risk Index:</td><td style="font-weight:700; text-align:right; color:' + badgeColor + ';">' + riskStr + '</td></tr>' +
+                '<tr><td style="color:#94a3b8;">Terrain / Rain Component:</td><td style="font-weight:600; text-align:right; color:#f1f5f9;">' + formatVal(row[5], 'pts', 2) + ' / ' + rcontribStr + '</td></tr>' +
+                '<tr><td style="color:#94a3b8;">RF Terrain Prob / Baseline Tier:</td><td style="font-weight:600; text-align:right; color:#f1f5f9;">' + formatVal(row[14], null, 3) + ' (' + escapeHtml(row[15]) + ')</td></tr>' +
             '</table>' +
-            '<div style="background:#f4f9fd; border:1px solid #d0e3f0; border-radius:6px; padding:6px 8px; margin-bottom:6px;">' +
-                '<div style="font-weight:bold; color:#1b4f72; margin-bottom:3px; font-size:10.5px;">NASA GPM IMERG Rainfall (24h Window)</div>' +
+            '<div style="background:rgba(30, 41, 59, 0.75); border:1px solid rgba(56, 189, 248, 0.2); border-radius:6px; padding:6px 8px; margin-bottom:6px;">' +
+                '<div style="font-weight:700; color:#38bdf8; margin-bottom:3px; font-size:10px; text-transform:uppercase; letter-spacing:0.4px;">NASA GPM IMERG Rainfall (24h Window)</div>' +
                 renderGpmRainfallRowsHtml(gpmProxy) +
-                '<div style="font-size:9.8px; color:#78909c; margin-top:3px;">Window: <b>' + escapeHtml(obsStartUtc) + '</b> to <b>' + escapeHtml(obsEndUtc) + '</b> (' + latencyStr + ') | <b>' + statusStr + '</b></div>' +
+                '<div style="font-size:9.5px; color:#94a3b8; margin-top:3px;">Window: <b>' + escapeHtml(obsStartUtc) + '</b> to <b>' + escapeHtml(obsEndUtc) + '</b> (' + latencyStr + ') | <b>' + statusStr + '</b></div>' +
             '</div>' +
-            '<div style="font-size:9.5px; color:#5d6d7e; background:#fef9e7; border:1px solid #f7dc6f; padding:4px 6px; border-radius:4px;">' +
+            '<div style="font-size:9.5px; color:#fef08a; background:rgba(234, 179, 8, 0.12); border:1px solid rgba(234, 179, 8, 0.3); padding:4px 6px; border-radius:4px;">' +
                 '<b>' + escapeHtml(meta.short) + ' Thresholds:</b> P50=' + cuts.P50_low_to_moderate.toFixed(2) + ', P80=' + cuts.P80_moderate_to_high.toFixed(2) + ', P95=' + cuts.P95_high_to_very_high.toFixed(2) + ' (regional percentile scale; not comparable across regions).' +
             '</div>' +
         '</div>';
@@ -885,36 +1195,36 @@ def _build_client_script(
     function renderEventPopupHtml(rkey, row) {{
         var meta = REGION_META[rkey];
         var extraHtml = '';
-        if (row[6]) extraHtml += '<div style="font-size:11px;"><b>Title:</b> ' + escapeHtml(row[6]) + '</div>';
-        if (row[7]) extraHtml += '<div style="font-size:11px;"><b>Date:</b> ' + escapeHtml(row[7]) + (row[8] ? (' · <b>Trigger:</b> ' + escapeHtml(row[8])) : '') + '</div>';
+        if (row[6]) extraHtml += '<div style="font-size:10.5px; color:#cbd5e1;"><b>Title:</b> ' + escapeHtml(row[6]) + '</div>';
+        if (row[7]) extraHtml += '<div style="font-size:10.5px; color:#cbd5e1;"><b>Date:</b> ' + escapeHtml(row[7]) + (row[8] ? (' · <b>Trigger:</b> ' + escapeHtml(row[8])) : '') + '</div>';
         var note = meta.pilot
             ? 'Validated historical event (Western Ghats Limited Pilot — 14 DEM tiles only).'
             : 'Documented historical landslide event from regional evaluation catalog.';
-        return '<div style="font-family:Arial,sans-serif; font-size:12px; width:285px; color:#2c3e50;">' +
-            '<div style="border-bottom:2px solid #8e44ad; padding-bottom:4px; margin-bottom:6px; font-weight:bold; color:#4a235a;">Historical Landslide Event · ' + escapeHtml(row[2]) + '</div>' +
-            '<div style="font-size:11px;"><b>Region:</b> ' + escapeHtml(meta.name) + (row[9] && row[9] !== meta.name ? (' (' + escapeHtml(row[9]) + ')') : '') + '</div>' +
+        return '<div style="font-family:system-ui, -apple-system, sans-serif; font-size:11.5px; width:285px; color:#e2e8f0; background:#0f172a; padding:2px;">' +
+            '<div style="border-bottom:2px solid #8e44ad; padding-bottom:4px; margin-bottom:6px; font-weight:700; color:#c084fc;">Historical Landslide Event · ' + escapeHtml(row[2]) + '</div>' +
+            '<div style="font-size:10.5px; color:#cbd5e1;"><b>Region:</b> ' + escapeHtml(meta.name) + (row[9] && row[9] !== meta.name ? (' (' + escapeHtml(row[9]) + ')') : '') + '</div>' +
             extraHtml +
-            '<div style="font-size:11px;"><b>DEM Tile:</b> ' + escapeHtml(row[3]) + '</div>' +
-            '<div style="font-size:11px;"><b>Coordinates:</b> ' + formatVal(row[0], '°N', 4) + ', ' + formatVal(row[1], '°E', 4) + '</div>' +
-            '<div style="font-size:11px;"><b>Elevation / Slope:</b> ' + formatVal(row[4], 'm', 1) + ' / ' + formatVal(row[5], '°', 1) + '</div>' +
-            '<div style="font-size:9.5px; color:#7f8c8d; margin-top:5px;">' + note + '</div>' +
+            '<div style="font-size:10.5px; color:#cbd5e1;"><b>DEM Tile:</b> ' + escapeHtml(row[3]) + '</div>' +
+            '<div style="font-size:10.5px; color:#cbd5e1;"><b>Coordinates:</b> ' + formatVal(row[0], '°N', 4) + ', ' + formatVal(row[1], '°E', 4) + '</div>' +
+            '<div style="font-size:10.5px; color:#cbd5e1;"><b>Elevation / Slope:</b> ' + formatVal(row[4], 'm', 1) + ' / ' + formatVal(row[5], '°', 1) + '</div>' +
+            '<div style="font-size:9.5px; color:#94a3b8; margin-top:5px; border-top:1px solid rgba(255,255,255,0.08); padding-top:3px;">' + note + '</div>' +
         '</div>';
     }}
 
     function renderBgPopupHtml(rkey, row) {{
         var meta = REGION_META[rkey];
-        var distHtml = row[7] ? '<div style="font-size:11px;"><b>Nearest Event Distance:</b> ' + escapeHtml(row[7]) + '</div>' : '';
+        var distHtml = row[7] ? '<div style="font-size:10.5px; color:#cbd5e1;"><b>Nearest Event Distance:</b> ' + escapeHtml(row[7]) + '</div>' : '';
         var note = meta.pilot
             ? 'Validated background control sample (Western Ghats Limited Pilot — 14 DEM tiles only).'
             : 'Provisional background sample from regional training/evaluation dataset.';
-        return '<div style="font-family:Arial,sans-serif; font-size:12px; width:285px; color:#2c3e50;">' +
-            '<div style="border-bottom:2px solid #16a085; padding-bottom:4px; margin-bottom:6px; font-weight:bold; color:#0e6251;">Background Sample · ' + escapeHtml(row[2]) + '</div>' +
-            '<div style="font-size:11px;"><b>Region:</b> ' + escapeHtml(meta.name) + (row[6] && row[6] !== meta.name ? (' (' + escapeHtml(row[6]) + ')') : '') + '</div>' +
-            '<div style="font-size:11px;"><b>DEM Tile:</b> ' + escapeHtml(row[3]) + '</div>' +
-            '<div style="font-size:11px;"><b>Coordinates:</b> ' + formatVal(row[0], '°N', 4) + ', ' + formatVal(row[1], '°E', 4) + '</div>' +
-            '<div style="font-size:11px;"><b>Elevation / Slope:</b> ' + formatVal(row[4], 'm', 1) + ' / ' + formatVal(row[5], '°', 1) + '</div>' +
+        return '<div style="font-family:system-ui, -apple-system, sans-serif; font-size:11.5px; width:285px; color:#e2e8f0; background:#0f172a; padding:2px;">' +
+            '<div style="border-bottom:2px solid #16a085; padding-bottom:4px; margin-bottom:6px; font-weight:700; color:#34d399;">Background Sample · ' + escapeHtml(row[2]) + '</div>' +
+            '<div style="font-size:10.5px; color:#cbd5e1;"><b>Region:</b> ' + escapeHtml(meta.name) + (row[6] && row[6] !== meta.name ? (' (' + escapeHtml(row[6]) + ')') : '') + '</div>' +
+            '<div style="font-size:10.5px; color:#cbd5e1;"><b>DEM Tile:</b> ' + escapeHtml(row[3]) + '</div>' +
+            '<div style="font-size:10.5px; color:#cbd5e1;"><b>Coordinates:</b> ' + formatVal(row[0], '°N', 4) + ', ' + formatVal(row[1], '°E', 4) + '</div>' +
+            '<div style="font-size:10.5px; color:#cbd5e1;"><b>Elevation / Slope:</b> ' + formatVal(row[4], 'm', 1) + ' / ' + formatVal(row[5], '°', 1) + '</div>' +
             distHtml +
-            '<div style="font-size:9.5px; color:#7f8c8d; margin-top:5px;">' + note + '</div>' +
+            '<div style="font-size:9.5px; color:#94a3b8; margin-top:5px; border-top:1px solid rgba(255,255,255,0.08); padding-top:3px;">' + note + '</div>' +
         '</div>';
     }}
 
@@ -1070,6 +1380,14 @@ def _build_client_script(
         if (meta) mapInst.setView(meta.center, meta.zoom);
     }}
 
+    function pad2(n) {{ return (n < 10 ? '0' : '') + n; }}
+    function updateLiveUtcClock() {{
+        var el = document.getElementById('live-utc-clock');
+        if (!el) return;
+        var now = new Date();
+        el.textContent = pad2(now.getUTCHours()) + ':' + pad2(now.getUTCMinutes()) + ':' + pad2(now.getUTCSeconds()) + ' UTC';
+    }}
+
     var _unifiedInitialized = false;
     function initUnifiedMap() {{
         if (_unifiedInitialized) return;
@@ -1113,6 +1431,8 @@ def _build_client_script(
 
         updateFreshnessStatus();
         setInterval(updateFreshnessStatus, 60000);
+        updateLiveUtcClock();
+        setInterval(updateLiveUtcClock, 1000);
     }}
 
     if (typeof window !== 'undefined') {{
