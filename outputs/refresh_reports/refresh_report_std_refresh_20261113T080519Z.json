@@ -1,0 +1,892 @@
+{
+  "schema_version": "standard_refresh_report_v1",
+  "run_id": "std_refresh_20261113T080519Z",
+  "execution_timestamp_utc": "2026-11-13T08:05:19Z",
+  "status": "SUCCESS",
+  "observation_window": {
+    "observation_start_utc": "2026-11-12T03:00:00Z",
+    "observation_end_utc": "2026-11-13T03:00:00Z",
+    "window_hours": 24,
+    "discovery_source": "NASA_CMR_ONLINE"
+  },
+  "data_latency": {
+    "latency_hours": 5.089,
+    "max_latency_hours": 12.0,
+    "is_fresh": true,
+    "freshness_status": "FRESH"
+  },
+  "granule_inventory": {
+    "granules_discovered_cmr": 150,
+    "granules_downloaded": 26,
+    "granules_cached": 22,
+    "granules_validated": 48,
+    "expected_granules": 48,
+    "missing_intervals_count": 0,
+    "is_24h_complete": true
+  },
+  "rainfall_window_status": {
+    "windows": [
+      "1h",
+      "3h",
+      "6h",
+      "12h",
+      "24h"
+    ],
+    "status": "VERIFIED_MONOTONIC",
+    "per_region_summary": {
+      "himalayas": {
+        "1h": {
+          "present": true,
+          "finite_count": 12052,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.123,
+          "max_mm": 8.19
+        },
+        "3h": {
+          "present": true,
+          "finite_count": 12052,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.3942,
+          "max_mm": 15.205
+        },
+        "6h": {
+          "present": true,
+          "finite_count": 12052,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.9165,
+          "max_mm": 28.635
+        },
+        "12h": {
+          "present": true,
+          "finite_count": 12052,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 1.7684,
+          "max_mm": 28.635
+        },
+        "24h": {
+          "present": true,
+          "finite_count": 12052,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 3.4363,
+          "max_mm": 42.405
+        }
+      },
+      "northeast": {
+        "1h": {
+          "present": true,
+          "finite_count": 14550,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.0,
+          "max_mm": 0.0
+        },
+        "3h": {
+          "present": true,
+          "finite_count": 14550,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.0,
+          "max_mm": 0.0
+        },
+        "6h": {
+          "present": true,
+          "finite_count": 14550,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.0,
+          "max_mm": 0.0
+        },
+        "12h": {
+          "present": true,
+          "finite_count": 14550,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.0,
+          "max_mm": 0.0
+        },
+        "24h": {
+          "present": true,
+          "finite_count": 14550,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.7938,
+          "max_mm": 35.425
+        }
+      },
+      "western_ghats": {
+        "1h": {
+          "present": true,
+          "finite_count": 4819,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.0004,
+          "max_mm": 0.22
+        },
+        "3h": {
+          "present": true,
+          "finite_count": 4819,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.0017,
+          "max_mm": 0.53
+        },
+        "6h": {
+          "present": true,
+          "finite_count": 4819,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.0017,
+          "max_mm": 0.53
+        },
+        "12h": {
+          "present": true,
+          "finite_count": 4819,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.1739,
+          "max_mm": 5.015
+        },
+        "24h": {
+          "present": true,
+          "finite_count": 4819,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.5151,
+          "max_mm": 5.88
+        }
+      }
+    }
+  },
+  "updated_locations_summary": {
+    "total_updated_locations": 31421,
+    "by_region": {
+      "himalayas": 12052,
+      "northeast": 14550,
+      "western_ghats": 4819
+    }
+  },
+  "assessment_coverage": {
+    "total_assessed_locations": 31421,
+    "total_unassessed_locations": 0,
+    "by_region": {
+      "himalayas": {
+        "assessed_count": 12052,
+        "unassessed_count": 0
+      },
+      "northeast": {
+        "assessed_count": 14550,
+        "unassessed_count": 0
+      },
+      "western_ghats": {
+        "assessed_count": 4819,
+        "unassessed_count": 0
+      }
+    }
+  },
+  "category_distribution_and_thresholds": {
+    "aggregate_category_counts": {
+      "Low": 15710,
+      "Moderate": 9426,
+      "High": 4713,
+      "Very High": 1572,
+      "Unassessed": 0
+    },
+    "by_region": {
+      "himalayas": {
+        "category_counts": {
+          "Low": 6026,
+          "Moderate": 3615,
+          "High": 1808,
+          "Very High": 603,
+          "Unassessed": 0
+        },
+        "relative_cutoffs": {
+          "P50_low_to_moderate": 14.268193749999998,
+          "P80_moderate_to_high": 31.822149999999997,
+          "P95_high_to_very_high": 42.42669406249999
+        }
+      },
+      "northeast": {
+        "category_counts": {
+          "Low": 7275,
+          "Moderate": 4365,
+          "High": 2182,
+          "Very High": 728,
+          "Unassessed": 0
+        },
+        "relative_cutoffs": {
+          "P50_low_to_moderate": 22.730925,
+          "P80_moderate_to_high": 34.706950000000006,
+          "P95_high_to_very_high": 41.346165
+        }
+      },
+      "western_ghats": {
+        "category_counts": {
+          "Low": 2409,
+          "Moderate": 1446,
+          "High": 723,
+          "Very High": 241,
+          "Unassessed": 0
+        },
+        "relative_cutoffs": {
+          "P50_low_to_moderate": 8.892316000000001,
+          "P80_moderate_to_high": 19.491061000000002,
+          "P95_high_to_very_high": 30.61163834999998
+        }
+      }
+    }
+  },
+  "gis_outputs": {
+    "himalayas": {
+      "html_map": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map.html",
+      "html_size_bytes": 9006437,
+      "map_metadata_json": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map_metadata.json",
+      "map_validation_report_json": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map_validation_report.json",
+      "risk_csv": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\himalayas_dynamic_risk\\himalayas_5km_dynamic_hazard_risk.csv",
+      "risk_metadata_json": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\himalayas_dynamic_risk\\himalayas_dynamic_risk_metadata.json",
+      "geojson_outputs": {
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map.geojson": {
+          "feature_count": 13037,
+          "geometry_types": [
+            "Point"
+          ],
+          "size_bytes": 13367741
+        },
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_5km_spatial_cells.geojson": {
+          "feature_count": 12052,
+          "geometry_types": [
+            "Polygon"
+          ],
+          "size_bytes": 17044385
+        },
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_regions.geojson": {
+          "feature_count": 1894,
+          "geometry_types": [
+            "Polygon"
+          ],
+          "size_bytes": 4840283
+        }
+      },
+      "synced_outputs": [
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map.html",
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_regions.geojson",
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_5km_spatial_cells.geojson",
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map.geojson",
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map_metadata.json",
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map_validation_report.json"
+      ]
+    },
+    "northeast": {
+      "html_map": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_dynamic_risk_map.html",
+      "html_size_bytes": 12507551,
+      "map_metadata_json": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_dynamic_risk_map_metadata.json",
+      "map_validation_report_json": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_dynamic_risk_map_validation_report.json",
+      "risk_csv": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk\\northeast_india_5km_dynamic_hazard_risk.csv",
+      "risk_metadata_json": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk\\northeast_dynamic_risk_metadata.json",
+      "geojson_outputs": {
+        "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk_map\\northeast_india_dynamic_hazard_risk.geojson": {
+          "feature_count": 14550,
+          "geometry_types": [
+            "Point"
+          ],
+          "size_bytes": 31250952
+        },
+        "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk_map\\northeast_india_5km_spatial_cells.geojson": {
+          "feature_count": 14550,
+          "geometry_types": [
+            "Polygon"
+          ],
+          "size_bytes": 20524991
+        },
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_dynamic_hazard_risk.geojson": {
+          "feature_count": 14550,
+          "geometry_types": [
+            "Point"
+          ],
+          "size_bytes": 31250952
+        },
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_5km_spatial_cells.geojson": {
+          "feature_count": 14550,
+          "geometry_types": [
+            "Polygon"
+          ],
+          "size_bytes": 20524991
+        },
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_dynamic_risk_regions.geojson": {
+          "feature_count": 3499,
+          "geometry_types": [
+            "Polygon"
+          ],
+          "size_bytes": 7958894
+        }
+      },
+      "synced_outputs": [
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_dynamic_risk_map.html",
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_dynamic_risk_regions.geojson",
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_5km_spatial_cells.geojson",
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_dynamic_hazard_risk.geojson",
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_dynamic_risk_map_metadata.json",
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_dynamic_risk_map_validation_report.json"
+      ]
+    },
+    "western_ghats": {
+      "html_map": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_map.html",
+      "html_size_bytes": 4656307,
+      "map_metadata_json": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_map_metadata.json",
+      "map_validation_report_json": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_map_validation_report.json",
+      "risk_csv": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\western_ghats_grid_dynamic_risk\\western_ghats_5km_dynamic_hazard_risk.csv",
+      "risk_metadata_json": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\western_ghats_grid_dynamic_risk\\western_ghats_dynamic_risk_metadata.json",
+      "geojson_outputs": {
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_hazard_risk.geojson": {
+          "feature_count": 6401,
+          "geometry_types": [
+            "Point"
+          ],
+          "size_bytes": 5963709
+        },
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_5km_spatial_cells.geojson": {
+          "feature_count": 4819,
+          "geometry_types": [
+            "Polygon"
+          ],
+          "size_bytes": 6901159
+        },
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_regions.geojson": {
+          "feature_count": 1478,
+          "geometry_types": [
+            "Polygon"
+          ],
+          "size_bytes": 3577156
+        }
+      },
+      "synced_outputs": [
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_map.html",
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_hazard_risk.geojson",
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_regions.geojson",
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_5km_spatial_cells.geojson",
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_map_metadata.json",
+        "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_map_validation_report.json"
+      ]
+    }
+  },
+  "validation_and_test_results": {
+    "preflight_status": "PASSED",
+    "preflight_passed": 17,
+    "preflight_total": 17,
+    "cross_region_validation_passed": true,
+    "unit_tests": {
+      "executed": true,
+      "all_passed": true,
+      "suites_total": 16,
+      "suites_passed": 16,
+      "total_elapsed_seconds": 265.75,
+      "suites": [
+        {
+          "module": "backend.test_himalayas_gpm_rainfall",
+          "passed": true,
+          "returncode": 0,
+          "elapsed_seconds": 3.39,
+          "summary": "Ran 9 tests in 1.768s | OK"
+        },
+        {
+          "module": "backend.test_himalayas_dynamic_risk",
+          "passed": true,
+          "returncode": 0,
+          "elapsed_seconds": 2.08,
+          "summary": "Ran 11 tests in 0.261s | OK"
+        },
+        {
+          "module": "backend.test_himalayas_dynamic_risk_map",
+          "passed": true,
+          "returncode": 0,
+          "elapsed_seconds": 13.94,
+          "summary": "Ran 28 tests in 11.867s | OK"
+        },
+        {
+          "module": "backend.test_northeast_gpm_rainfall",
+          "passed": true,
+          "returncode": 0,
+          "elapsed_seconds": 5.27,
+          "summary": "Ran 9 tests in 2.677s | OK"
+        },
+        {
+          "module": "backend.test_northeast_dynamic_risk",
+          "passed": true,
+          "returncode": 0,
+          "elapsed_seconds": 2.6,
+          "summary": "Ran 11 tests in 0.287s | OK"
+        },
+        {
+          "module": "backend.test_northeast_risk_map",
+          "passed": true,
+          "returncode": 0,
+          "elapsed_seconds": 138.33,
+          "summary": "Ran 12 tests in 135.676s | OK"
+        },
+        {
+          "module": "backend.test_western_ghats_spatial_grid",
+          "passed": true,
+          "returncode": 0,
+          "elapsed_seconds": 8.27,
+          "summary": "Ran 6 tests in 5.484s | OK"
+        },
+        {
+          "module": "backend.test_western_ghats_terrain_susceptibility",
+          "passed": true,
+          "returncode": 0,
+          "elapsed_seconds": 2.49,
+          "summary": "Ran 4 tests in 0.196s | OK"
+        },
+        {
+          "module": "backend.test_western_ghats_gpm_grid_rainfall",
+          "passed": true,
+          "returncode": 0,
+          "elapsed_seconds": 5.7,
+          "summary": "Ran 5 tests in 3.634s | OK"
+        },
+        {
+          "module": "backend.test_western_ghats_grid_dynamic_risk",
+          "passed": true,
+          "returncode": 0,
+          "elapsed_seconds": 3.27,
+          "summary": "Ran 3 tests in 0.982s | OK"
+        },
+        {
+          "module": "backend.test_western_ghats_polygon_risk_map",
+          "passed": true,
+          "returncode": 0,
+          "elapsed_seconds": 17.81,
+          "summary": "Ran 11 tests in 14.863s | OK"
+        },
+        {
+          "module": "backend.test_western_ghats_gpm_refresh",
+          "passed": true,
+          "returncode": 0,
+          "elapsed_seconds": 17.21,
+          "summary": "Ran 12 tests in 15.077s | OK"
+        },
+        {
+          "module": "backend.test_western_ghats_rainfall_terrain_integration",
+          "passed": true,
+          "returncode": 0,
+          "elapsed_seconds": 28.54,
+          "summary": "Ran 10 tests in 26.364s | OK"
+        },
+        {
+          "module": "backend.test_western_ghats_dynamic_risk",
+          "passed": true,
+          "returncode": 0,
+          "elapsed_seconds": 2.45,
+          "summary": "Ran 20 tests in 0.869s | OK"
+        },
+        {
+          "module": "backend.test_western_ghats_risk_map",
+          "passed": true,
+          "returncode": 0,
+          "elapsed_seconds": 9.25,
+          "summary": "Ran 14 tests in 7.160s | OK"
+        },
+        {
+          "module": "backend.test_standard_refresh_procedure",
+          "passed": true,
+          "returncode": 0,
+          "elapsed_seconds": 5.14,
+          "summary": "Ran 10 tests in 2.595s | OK"
+        }
+      ]
+    },
+    "errors": [],
+    "warnings": [],
+    "skipped_regions": [],
+    "transaction_recovery": {
+      "scanned": false,
+      "recovered_transactions": [],
+      "cleaned_completed_backups": [],
+      "cleaned_temp_files": [],
+      "preserved_uncertain": [],
+      "errors": []
+    }
+  },
+  "unified_map": {
+    "status": "SUCCESS",
+    "validation_passed": true,
+    "output_html": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\india_unified_dynamic_risk_map.html",
+    "html_size_bytes": 6304157,
+    "html_size_mb": 6.01,
+    "observation_start_utc": "2026-11-12T03:00:00Z",
+    "observation_end_utc": "2026-11-13T03:00:00Z",
+    "generation_timestamp_utc": "2026-11-13T08:05:19Z",
+    "latency_hours": 5.0888,
+    "counts": {
+      "total_cells": 31421,
+      "total_events": 1179,
+      "total_background": 2306,
+      "by_region": {
+        "himalayas": {
+          "cells": 12052,
+          "events": 556,
+          "background": 429
+        },
+        "northeast": {
+          "cells": 14550,
+          "events": 441,
+          "background": 477
+        },
+        "western_ghats": {
+          "cells": 4819,
+          "events": 182,
+          "background": 1400
+        }
+      }
+    }
+  },
+  "regions": {
+    "himalayas": {
+      "display_name": "Himalayas",
+      "status": "SUCCESS",
+      "rollback_performed": false,
+      "validation_passed": true,
+      "errors": [],
+      "warnings": [],
+      "total_locations": 12052,
+      "unique_tiles": 29,
+      "assessed_count": 12052,
+      "unassessed_count": 0,
+      "category_counts": {
+        "Low": 6026,
+        "Moderate": 3615,
+        "High": 1808,
+        "Very High": 603,
+        "Unassessed": 0
+      },
+      "relative_cutoffs": {
+        "P50_low_to_moderate": 14.268193749999998,
+        "P80_moderate_to_high": 31.822149999999997,
+        "P95_high_to_very_high": 42.42669406249999
+      },
+      "observation_start_utc": "2026-11-12T03:00:00Z",
+      "observation_end_utc": "2026-11-13T03:00:00Z",
+      "latency_hours": 5.089,
+      "windows_5_monotonic": true,
+      "window_stats": {
+        "1h": {
+          "present": true,
+          "finite_count": 12052,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.123,
+          "max_mm": 8.19
+        },
+        "3h": {
+          "present": true,
+          "finite_count": 12052,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.3942,
+          "max_mm": 15.205
+        },
+        "6h": {
+          "present": true,
+          "finite_count": 12052,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.9165,
+          "max_mm": 28.635
+        },
+        "12h": {
+          "present": true,
+          "finite_count": 12052,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 1.7684,
+          "max_mm": 28.635
+        },
+        "24h": {
+          "present": true,
+          "finite_count": 12052,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 3.4363,
+          "max_mm": 42.405
+        }
+      },
+      "gis_paths": {
+        "html_map": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map.html",
+        "html_size_bytes": 9006437,
+        "map_metadata_json": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map_metadata.json",
+        "map_validation_report_json": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map_validation_report.json",
+        "risk_csv": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\himalayas_dynamic_risk\\himalayas_5km_dynamic_hazard_risk.csv",
+        "risk_metadata_json": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\himalayas_dynamic_risk\\himalayas_dynamic_risk_metadata.json",
+        "geojson_outputs": {
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map.geojson": {
+            "feature_count": 13037,
+            "geometry_types": [
+              "Point"
+            ],
+            "size_bytes": 13367741
+          },
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_5km_spatial_cells.geojson": {
+            "feature_count": 12052,
+            "geometry_types": [
+              "Polygon"
+            ],
+            "size_bytes": 17044385
+          },
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_regions.geojson": {
+            "feature_count": 1894,
+            "geometry_types": [
+              "Polygon"
+            ],
+            "size_bytes": 4840283
+          }
+        },
+        "synced_outputs": [
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map.html",
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_regions.geojson",
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_5km_spatial_cells.geojson",
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map.geojson",
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map_metadata.json",
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map_validation_report.json"
+        ]
+      }
+    },
+    "northeast": {
+      "display_name": "Northeast India",
+      "status": "SUCCESS",
+      "rollback_performed": false,
+      "validation_passed": true,
+      "errors": [],
+      "warnings": [],
+      "total_locations": 14550,
+      "unique_tiles": 33,
+      "assessed_count": 14550,
+      "unassessed_count": 0,
+      "category_counts": {
+        "Low": 7275,
+        "Moderate": 4365,
+        "High": 2182,
+        "Very High": 728,
+        "Unassessed": 0
+      },
+      "relative_cutoffs": {
+        "P50_low_to_moderate": 22.730925,
+        "P80_moderate_to_high": 34.706950000000006,
+        "P95_high_to_very_high": 41.346165
+      },
+      "observation_start_utc": "2026-11-12T03:00:00Z",
+      "observation_end_utc": "2026-11-13T03:00:00Z",
+      "latency_hours": 5.089,
+      "windows_5_monotonic": true,
+      "window_stats": {
+        "1h": {
+          "present": true,
+          "finite_count": 14550,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.0,
+          "max_mm": 0.0
+        },
+        "3h": {
+          "present": true,
+          "finite_count": 14550,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.0,
+          "max_mm": 0.0
+        },
+        "6h": {
+          "present": true,
+          "finite_count": 14550,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.0,
+          "max_mm": 0.0
+        },
+        "12h": {
+          "present": true,
+          "finite_count": 14550,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.0,
+          "max_mm": 0.0
+        },
+        "24h": {
+          "present": true,
+          "finite_count": 14550,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.7938,
+          "max_mm": 35.425
+        }
+      },
+      "gis_paths": {
+        "html_map": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_dynamic_risk_map.html",
+        "html_size_bytes": 12507551,
+        "map_metadata_json": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_dynamic_risk_map_metadata.json",
+        "map_validation_report_json": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_dynamic_risk_map_validation_report.json",
+        "risk_csv": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk\\northeast_india_5km_dynamic_hazard_risk.csv",
+        "risk_metadata_json": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk\\northeast_dynamic_risk_metadata.json",
+        "geojson_outputs": {
+          "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk_map\\northeast_india_dynamic_hazard_risk.geojson": {
+            "feature_count": 14550,
+            "geometry_types": [
+              "Point"
+            ],
+            "size_bytes": 31250952
+          },
+          "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk_map\\northeast_india_5km_spatial_cells.geojson": {
+            "feature_count": 14550,
+            "geometry_types": [
+              "Polygon"
+            ],
+            "size_bytes": 20524991
+          },
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_dynamic_hazard_risk.geojson": {
+            "feature_count": 14550,
+            "geometry_types": [
+              "Point"
+            ],
+            "size_bytes": 31250952
+          },
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_5km_spatial_cells.geojson": {
+            "feature_count": 14550,
+            "geometry_types": [
+              "Polygon"
+            ],
+            "size_bytes": 20524991
+          },
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_dynamic_risk_regions.geojson": {
+            "feature_count": 3499,
+            "geometry_types": [
+              "Polygon"
+            ],
+            "size_bytes": 7958894
+          }
+        },
+        "synced_outputs": [
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_dynamic_risk_map.html",
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_dynamic_risk_regions.geojson",
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_5km_spatial_cells.geojson",
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_india_dynamic_hazard_risk.geojson",
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_dynamic_risk_map_metadata.json",
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\northeast_dynamic_risk_map_validation_report.json"
+        ]
+      }
+    },
+    "western_ghats": {
+      "display_name": "Western Ghats (Limited Pilot)",
+      "status": "SUCCESS",
+      "rollback_performed": false,
+      "validation_passed": true,
+      "errors": [],
+      "warnings": [],
+      "total_locations": 4819,
+      "unique_tiles": 14,
+      "coverage_note": "Limited Western Ghats pilot only: 14 validated DEM tiles, 4,819 5 km grid cells, 182 historical landslide events, and 1,400 background samples; does not imply complete Western Ghats coverage.",
+      "assessed_count": 4819,
+      "unassessed_count": 0,
+      "category_counts": {
+        "Low": 2409,
+        "Moderate": 1446,
+        "High": 723,
+        "Very High": 241,
+        "Unassessed": 0
+      },
+      "relative_cutoffs": {
+        "P50_low_to_moderate": 8.892316000000001,
+        "P80_moderate_to_high": 19.491061000000002,
+        "P95_high_to_very_high": 30.61163834999998
+      },
+      "observation_start_utc": "2026-11-12T03:00:00Z",
+      "observation_end_utc": "2026-11-13T03:00:00Z",
+      "latency_hours": 5.089,
+      "windows_5_monotonic": true,
+      "window_stats": {
+        "1h": {
+          "present": true,
+          "finite_count": 4819,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.0004,
+          "max_mm": 0.22
+        },
+        "3h": {
+          "present": true,
+          "finite_count": 4819,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.0017,
+          "max_mm": 0.53
+        },
+        "6h": {
+          "present": true,
+          "finite_count": 4819,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.0017,
+          "max_mm": 0.53
+        },
+        "12h": {
+          "present": true,
+          "finite_count": 4819,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.1739,
+          "max_mm": 5.015
+        },
+        "24h": {
+          "present": true,
+          "finite_count": 4819,
+          "missing_count": 0,
+          "min_mm": 0.0,
+          "mean_mm": 0.5151,
+          "max_mm": 5.88
+        }
+      },
+      "gis_paths": {
+        "html_map": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_map.html",
+        "html_size_bytes": 4656307,
+        "map_metadata_json": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_map_metadata.json",
+        "map_validation_report_json": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_map_validation_report.json",
+        "risk_csv": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\western_ghats_grid_dynamic_risk\\western_ghats_5km_dynamic_hazard_risk.csv",
+        "risk_metadata_json": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\western_ghats_grid_dynamic_risk\\western_ghats_dynamic_risk_metadata.json",
+        "geojson_outputs": {
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_hazard_risk.geojson": {
+            "feature_count": 6401,
+            "geometry_types": [
+              "Point"
+            ],
+            "size_bytes": 5963709
+          },
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_5km_spatial_cells.geojson": {
+            "feature_count": 4819,
+            "geometry_types": [
+              "Polygon"
+            ],
+            "size_bytes": 6901159
+          },
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_regions.geojson": {
+            "feature_count": 1478,
+            "geometry_types": [
+              "Polygon"
+            ],
+            "size_bytes": 3577156
+          }
+        },
+        "synced_outputs": [
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_map.html",
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_hazard_risk.geojson",
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_regions.geojson",
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_5km_spatial_cells.geojson",
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_map_metadata.json",
+          "D:\\Vedant\\Codes\\Landslide-India\\outputs\\western_ghats_dynamic_risk_map_validation_report.json"
+        ]
+      }
+    }
+  }
+}
