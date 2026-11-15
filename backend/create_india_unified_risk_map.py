@@ -884,6 +884,13 @@ def _build_dashboard_legend_html(
             background: rgba(56, 189, 248, 0.25) !important;
             color: #ffffff !important;
         }}
+        /* Keep zoom controls visible outside the command sidebars */
+        .leaflet-control-zoom {{
+            position: fixed !important;
+            right: 18px !important;
+            bottom: 45px !important;
+            z-index: 1100 !important;
+        }}
         .leaflet-container {{
             background: #080d1a !important;
         }}
@@ -1696,7 +1703,7 @@ def generate_india_unified_risk_map(
             "bg": fg_b.get_name(),
         }
 
-    folium.LayerControl(collapsed=True).add_to(map_obj)
+
 
     gen_ts_utc = eval_now.strftime("%Y-%m-%dT%H:%M:%SZ")
     dashboard_html = _build_dashboard_legend_html(

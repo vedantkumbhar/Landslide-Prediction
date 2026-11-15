@@ -1,7 +1,7 @@
 {
   "status": "PASSED",
   "stage": "Stage 7.5 \u2014 Northeast India Dynamic GIS Risk Map and GeoJSON Integration",
-  "generation_timestamp_utc": "2026-11-13T10:27:37Z",
+  "generation_timestamp_utc": "2026-11-15T13:13:11Z",
   "coverage_region": "Northeast India",
   "dem_tiles_count": 33,
   "tiles": [
@@ -41,11 +41,11 @@
   ],
   "outputs": {
     "html_map_path": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk_map\\northeast_india_dynamic_risk_map.html",
-    "html_map_size_bytes": 12489966,
+    "html_map_size_bytes": 12454479,
     "regions_geojson_path": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk_map\\northeast_india_dynamic_risk_regions.geojson",
-    "regions_geojson_size_bytes": 7947795,
+    "regions_geojson_size_bytes": 7964258,
     "cells_geojson_path": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk_map\\northeast_india_5km_spatial_cells.geojson",
-    "cells_geojson_size_bytes": 20524022,
+    "cells_geojson_size_bytes": 20517731,
     "point_geojson_path": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk_map\\northeast_india_dynamic_hazard_risk.geojson",
     "map_metadata_path": "D:\\Vedant\\Codes\\Landslide-India\\data\\processed\\northeast_dynamic_risk_map\\northeast_dynamic_risk_map_metadata.json",
     "synced_outputs": {
@@ -58,9 +58,9 @@
     }
   },
   "polygon_summary": {
-    "dynamic_hazard_regions_count": 3492,
+    "dynamic_hazard_regions_count": 3505,
     "terrain_regions_count": 3664,
-    "rainfall_regions_count": 32,
+    "rainfall_regions_count": 18,
     "cells_covered": 14550
   },
   "grid_layer": {
@@ -74,9 +74,9 @@
       "UNASSESSED": 0
     },
     "relative_category_cutoffs": {
-      "P50": 22.670975,
-      "P80": 34.69453,
-      "P95": 41.30014499999999
+      "P50": 22.655749999999998,
+      "P80": 34.616445,
+      "P95": 41.232612499999995
     }
   },
   "evaluation_layers": {
@@ -85,9 +85,9 @@
     "separation_guarantee": "Historical events and background samples are rendered in dedicated layers, strictly separate from 5 km regular grid predictions."
   },
   "gpm_observation_metadata": {
-    "observation_start_utc": "2026-11-12T05:00:00Z",
-    "observation_end_utc": "2026-11-13T05:00:00Z",
-    "latency_hours": 5.387,
+    "observation_start_utc": "2026-11-14T08:00:00Z",
+    "observation_end_utc": "2026-11-15T08:00:00Z",
+    "latency_hours": 5.142,
     "freshness_status": "SUCCESS",
     "is_24h_complete": true
   },
