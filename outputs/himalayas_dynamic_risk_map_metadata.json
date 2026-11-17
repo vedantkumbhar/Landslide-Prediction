@@ -7,42 +7,42 @@
   "historical_events_count": 556,
   "background_samples_count": 429,
   "regional_polygons": {
-    "dynamic_hazard_screening_regions": 2093,
+    "dynamic_hazard_screening_regions": 2089,
     "terrain_susceptibility_regions": 2429,
-    "rainfall_contribution_regions": 86,
+    "rainfall_contribution_regions": 61,
     "total_cells_covered": 12052,
     "all_geometries_valid": true
   },
   "layers": {
-    "dynamic_hazard_screening": 2093,
+    "dynamic_hazard_screening": 2089,
     "terrain_susceptibility": 2429,
-    "rainfall_contribution": 86,
+    "rainfall_contribution": 61,
     "historical_landslide_events": 556,
     "validated_background_samples": 429
   },
   "output_files": {
     "html_map": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map.html",
-    "html_size_bytes": 9322531,
+    "html_size_bytes": 9254179,
     "regions_geojson": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_regions.geojson",
-    "regions_geojson_size_bytes": 5201183,
+    "regions_geojson_size_bytes": 5189024,
     "cells_geojson": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_5km_spatial_cells.geojson",
-    "cells_geojson_size_bytes": 17039316,
+    "cells_geojson_size_bytes": 17018584,
     "point_geojson": "D:\\Vedant\\Codes\\Landslide-India\\outputs\\himalayas_dynamic_risk_map.geojson",
-    "point_geojson_size_bytes": 13364020
+    "point_geojson_size_bytes": 13348666
   },
   "observation_metadata": {
-    "observation_start_utc": "2026-11-14T08:00:00Z",
-    "observation_end_utc": "2026-11-15T08:00:00Z",
-    "latency_hours": 5.14,
+    "observation_start_utc": "2026-11-14T23:00:00Z",
+    "observation_end_utc": "2026-11-15T23:00:00Z",
+    "latency_hours": 5.24,
     "max_latency_hours_allowed": 12.0,
     "is_fresh": true,
     "status": "SUCCESS"
   },
   "approved_relative_thresholds": {
-    "P50_low_to_moderate": 13.463527083333334,
-    "P80_moderate_to_high": 30.645354166666674,
-    "P95_high_to_very_high": 41.09474499999998
+    "P50_low_to_moderate": 13.376225000000002,
+    "P80_moderate_to_high": 30.520129999999998,
+    "P95_high_to_very_high": 41.029622499999995
   },
-  "generation_timestamp_utc": "2026-11-15T13:08:31.607886Z",
+  "generation_timestamp_utc": "2026-11-16T04:14:18.289359Z",
   "disclaimer": "EXPERIMENTAL PROVISIONAL SCREENING ONLY \u2014 NOT AN OFFICIAL WARNING OR CALIBRATED PROBABILITY"
 }

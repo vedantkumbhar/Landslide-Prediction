@@ -9,20 +9,20 @@
   "historical_events_count": 182,
   "background_samples_count": 1400,
   "total_features_in_point_geojson": 6401,
-  "regional_polygons_count": 1421,
+  "regional_polygons_count": 1494,
   "spatial_cells_count": 4819,
-  "html_size_mb": 4.4,
-  "regions_geojson_size_mb": 3.31,
+  "html_size_mb": 4.5,
+  "regions_geojson_size_mb": 3.44,
   "cells_geojson_size_mb": 6.6,
   "freshness_audit": {
-    "observation_start_utc": "2026-11-14T08:00:00Z",
-    "observation_end_utc": "2026-11-15T08:00:00Z",
-    "calculated_latency_hours": 5.1421,
+    "observation_start_utc": "2026-11-14T23:00:00Z",
+    "observation_end_utc": "2026-11-15T23:00:00Z",
+    "calculated_latency_hours": 5.2384,
     "freshness_status": "FRESH",
     "is_stale": false,
     "is_fresh": true,
-    "reason": "Fresh complete observation (5.14h <= 12.0h)",
-    "map_generation_timestamp_utc": "2026-11-15T13:08:31.607886Z"
+    "reason": "Fresh complete observation (5.24h <= 12.0h)",
+    "map_generation_timestamp_utc": "2026-11-16T04:14:18.289359Z"
   },
   "validation_checks": {
     "all_grid_locations_represented": true,
@@ -37,6 +37,6 @@
     "shared_popup_template_used": true,
     "rfc7946_geojson_valid": true
   },
-  "generation_timestamp_utc": "2026-11-15T13:08:31.607886Z",
+  "generation_timestamp_utc": "2026-11-16T04:14:18.289359Z",
   "disclaimer": "Limited Western Ghats Pilot across 14 validated DEM tiles only (4,819 5 km grid cells, 182 historical landslide events, 1,400 background samples); does not imply complete Western Ghats coverage. EXPERIMENTAL_PROVISIONAL_WESTERN_GHATS_LIMITED_PILOT_14_TILES_ONLY_NOT_OFFICIAL_WARNING."
 }
