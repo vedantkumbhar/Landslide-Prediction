@@ -18,3 +18,11 @@ ml/models/
 
 # Temporary inspection scripts
 inspect_rainfall_files_temp.py
+
+# Local backups - preserve on this computer, don't upload to GitHub
+outputs/backup/
+
+# Temporary refresh files and local logs
+outputs/refresh_reports/*.lock
+outputs/refresh_reports/*.log
+outputs/refresh_reports/*.xml
